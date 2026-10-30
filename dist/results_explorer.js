@@ -27,11 +27,11 @@ const axisControls=document.createElement('div');
 axisControls.className='axis-controls';
 axisControls.innerHTML='<label>X axis<select id="chartX" aria-label="X axis"><option value="Plot">Plot</option><option value="Irrigation_treatment">Irrigation treatment</option><option value="Nitrogen_treatment">Nitrogen treatment</option><option value="Year">Year</option><option value="Rain_mm">Rainfall · mm</option><option value="Irrigation_mm">Irrigation · mm</option><option value="Model_ETa_mm">Modeled ET · mm</option><option value="Drainage_mm">Drainage · mm</option><option value="WB_days">Measured WB days</option></select></label>';
 const chartY=$('chartMetric');
+chartY.parentElement.append(axisControls);
 for(const [value,label] of [['ETo_mm','Reference ETo · mm'],['Storage_change_mm','Soil water storage change · mm'],['Storage_initial_mm','Initial soil water storage · mm'],['Storage_final_mm','Final soil water storage · mm'],['Water_stress_days','Modeled water stress · days'],['Mean_Ks','Mean water stress coefficient · 0–1'],['Observed_profiles','Complete soil moisture profiles · dates'],['Nitrate_dates','Valid nitrate concentrations · dates']]){
  const option=document.createElement('option');option.value=value;option.textContent=label;chartY.append(option);
 }
 for(const option of chartY.options)if(![...$('chartX').options].some(item=>item.value===option.value))$('chartX').append(option.cloneNode(true));
-chartY.parentElement.append(axisControls);
 axisControls.append(chartY);
 const yLabel=document.createElement('label');
 yLabel.textContent='Y axis';
