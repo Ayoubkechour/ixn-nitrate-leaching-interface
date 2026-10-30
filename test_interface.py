@@ -20,9 +20,20 @@ class InputTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='ixn-input-test-')
         self.root=Path(self.tmp.name)
+        fixture={}
+        for role in ['weather','irrigation','nitrate','moisture','plots']:
+            table=pd.read_csv(HERE/'dist'/'templates'/('example_'+role+'.csv'))
+            if role=='weather':
+                table=table.loc[table.Date.between('2022-04-01','2022-08-31')]
+            elif role=='plots':
+                table=table.loc[table.Plot.isin([101,102,103])]
+            else:
+                table=table.loc[table.Plot.isin([101,102,103]) & table.Date.le('2022-08-31')]
+            fixture[role]=str(self.root/('fixture_'+role+'.csv'))
+            table.to_csv(fixture[role],index=False)
         self.config=dict(mode='tables',dataset='Test',site='Test field',planting_date='2022-05-16',end_date='2022-08-31',
             latitude_deg=45.34399,elevation_m=287.1216,wind_height_m=3,irrigation_complete=True,
-            files={role:str(HERE/'dist'/'templates'/('example_'+role+'.csv')) for role in ['weather','irrigation','nitrate','moisture','plots']})
+            files=fixture)
 
     def tearDown(self):self.tmp.cleanup()
 
@@ -106,6 +117,7 @@ class InputTests(unittest.TestCase):
             result,_=analyze(self.config,self.root,lambda message:None)
         self.assertTrue(all(abs(row['Model_profile_depth_m']-.9144)<1e-9 for row in result['plot_year']))
         self.assertIn('6in_VWC %',result['daily'][0])
+        self.assertIn('ETo_mm',result['daily'][0])
 
     def test_pr2_rejects_unmatched_custom_profile(self):
         self.config['parameters']={'soil_bottom_m':[.3,.6,.9,1.1]}

@@ -170,7 +170,12 @@ def run(config=None, parameters=None, progress=print):
                 d['Irrigation_mm'] = d.Irrigation_mm.fillna(0)
                 d['Blank_irrigation_imputed'] = d.Blank_irrigation_imputed.fillna(False).astype(bool)
                 d['Irrigation_observed_mm'] = d.Irrigation_observed_mm.where(d.Blank_irrigation_imputed, d.Irrigation_observed_mm.fillna(0))
-                dm = m.loc[m.Plot == row.Plot, ['Date','Observed_storage_mm']]
+                # Retain the measured PR2 depths for the interface's depth-by-date view.
+                # Sources.moisture stores VWC as fractions after validation; the named
+                # source columns are percentages in the raw workbook and chart.
+                sensor_cols = ['6in_VWC %','12in_VWC %','18in_VWC %','24_inVWC %','36in_VWC %']
+                dm = m.loc[m.Plot == row.Plot, ['Date','Observed_storage_mm'] + sensor_cols].copy()
+                dm[sensor_cols] = dm[sensor_cols] * 100
                 dn = n.loc[n.Plot == row.Plot, ['Date','Nitrate_mg_L','Valid_positions','Valid_lab_samples']]
                 d = d.merge(dm, on='Date', how='left', validate='one_to_one').merge(dn, on='Date', how='left', validate='one_to_one')
                 meta = dict(Dataset='raw_IXN', Site=site, Year=year, Plot=int(row.Plot),

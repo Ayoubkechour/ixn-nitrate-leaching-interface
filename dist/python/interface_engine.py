@@ -228,6 +228,10 @@ def analyze(request, workspace, progress=print):
             raise ValueError('Station metadata must be finite numbers.')
         weather = tables['weather'].sort_values('Date')
         weather = weather.loc[weather.Date <= end].copy()
+        history_start = min(planting, pd.Timestamp(year=planting.year, month=4, day=1))
+        if not weather.empty and weather.Date.min() < history_start:
+            note(f'Weather before {history_start.date()} is retained in the input audit; the IXN model initializes from that date, matching its April 1 preplant history convention.', 'weather')
+            weather = weather.loc[weather.Date >= history_start].copy()
         if weather.empty or weather.Date.min() > planting or weather.Date.max() != end:
             raise ValueError('Weather must cover planting through the selected end date, including the final day.')
         expected = pd.date_range(weather.Date.min(), end)
@@ -384,7 +388,7 @@ def analyze(request, workspace, progress=print):
     # Load daily charts on demand rather than sending every plot to the browser.
     preview_folder = workspace/'daily_previews'
     preview_folder.mkdir(exist_ok=True)
-    daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L'] + PR2_COLUMNS
+    daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETo_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L'] + PR2_COLUMNS
     identities = ['Dataset', 'Site', 'Year', 'Plot']
     daily_plots = []
     for index, (identity, group) in enumerate(daily.groupby(identities, sort=True)):

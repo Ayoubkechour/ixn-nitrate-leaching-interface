@@ -15,6 +15,7 @@ function resetExplorer(data){
   $(id).innerHTML='<option value="all">All treatments</option>'+values.map(value=>`<option>${esc(value)}</option>`).join('');
  }
  $('comparisonMetric').innerHTML=$('chartMetric').innerHTML;
+ $('comparisonMetric').value='Model_ETa_mm';
  $('dailyPlot').innerHTML='';
 }
 function renderExplorer(rows){
@@ -50,16 +51,49 @@ function comparisonRows(rows,metric,byYear){
 function renderComparison(rows=filteredRows()){
  const metric=$('comparisonMetric').value;
  const records=comparisonRows(rows,metric,$('comparisonGroup').value==='years');
+ renderTreatmentMatrix(rows,metric);
  const columns=Object.keys(records[0]||{}).filter(key=>key!=='Metric');
  const numeric=new Set(['Mean','SD','Minimum','Maximum']);
  $('comparisonTable').innerHTML=records.length?`<thead><tr>${columns.map(key=>`<th>${esc(key.replace(/_/g,' '))}</th>`).join('')}</tr></thead><tbody>${records.map(row=>`<tr>${columns.map(key=>`<td>${numeric.has(key)?number(row[key]):esc(row[key])}</td>`).join('')}</tr>`).join('')}</tbody>`:'<tbody><tr><td>No rows match these filters.</td></tr></tbody>';
  csvDownload('comparison',records);
+}
+const treatmentMatrix=document.createElement('div');
+treatmentMatrix.id='comparisonMatrix';
+document.querySelector('#results-comparison .table-scroll').before(treatmentMatrix);
+const siteETMatrix=document.createElement('div');
+siteETMatrix.id='siteETMatrix';
+siteETMatrix.className='card';
+document.querySelector('#results-plots > .card').before(siteETMatrix);
+function renderTreatmentMatrix(rows,metric,target=treatmentMatrix,asSiteOverview=false){
+ if((!asSiteOverview&&$('comparisonGroup').value!=='treatments')||!rows.length){target.innerHTML='';target.classList.toggle('hidden',asSiteOverview);return;}
+ target.classList.remove('hidden');
+ const siteYears=[...new Set(rows.map(row=>`${row.Dataset} / ${row.Site} / ${row.Year}`))];
+ if(siteYears.length!==1){target.innerHTML='<div class="matrix-notice">Select one site / year to view the treatment matrix.</div>';return;}
+ const irrigation=[...new Set(rows.map(row=>String(row.Irrigation_treatment)))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ const nitrogen=[...new Set(rows.map(row=>String(row.Nitrogen_treatment)))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ const cells=new Map();
+ for(const i of irrigation)for(const n of nitrogen){
+  const values=rows.filter(row=>String(row.Irrigation_treatment)===i&&String(row.Nitrogen_treatment)===n).map(row=>row[metric]).filter(finiteValue);
+  cells.set(JSON.stringify([i,n]),{mean:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,n:values.length});
+ }
+ const available=[...cells.values()].map(cell=>cell.mean).filter(finiteValue);
+ const low=Math.min(...available),high=Math.max(...available);
+ const color=value=>{const fraction=high===low?.55:(value-low)/(high-low);return `hsl(153 28% ${Math.round(95-43*fraction)}%)`;};
+ const header=nitrogen.map(n=>`<th scope="col">${esc(n)}</th>`).join('');
+ const body=irrigation.map(i=>`<tr><th scope="row">${esc(i)}</th>${nitrogen.map(n=>{
+  const cell=cells.get(JSON.stringify([i,n]));
+  return `<td class="matrix-cell" ${cell.n?`style="background:${color(cell.mean)}"`:''} title="${esc(i)} × ${esc(n)} · ${cell.n?`${number(cell.mean,2)} · n=${cell.n}`:'No observations'}">${cell.n?`<strong>${number(cell.mean,1)}</strong><small>n = ${cell.n}</small>`:'<span>—</span>'}</td>`;
+ }).join('')}</tr>`).join('');
+ const label=asSiteOverview?'Modeled ET · mm':$('comparisonMetric').selectedOptions[0].text;
+ target.innerHTML=`<div class="matrix-heading"><div><strong>${asSiteOverview?'Site-year ET across all plots':'Treatment pattern'} · ${esc(siteYears[0])}</strong><span>${esc(label)} · mean across plots; descriptive only</span></div><span>Rows: irrigation · columns: nitrogen</span></div><div class="matrix-scroll"><table><thead><tr><th scope="col">Irrigation</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="matrix-footnote">Cell shading is relative to this selected site/year and metric. Missing values stay blank; n counts plots with a value.</div>`;
 }
 function displayDaily(rows,metadata){
  $('dailyTitle').textContent=`Daily water budget · ${metadata.Site} ${metadata.Year} · plot ${metadata.Plot}`;
  const summary=state.results.plot_year.find(row=>identityKey(row)===identityKey(metadata));
  $('dailyCoverage').textContent=summary?`${summary.Days} model days · ${summary.WB_days} days with measured WB · ${summary.Leaching_days} days covered by nitrate sample intervals. WB source: ${summary.WB_ETa_source.replace(/_/g,' ')}.`:'';
  drawDaily(rows);
+ drawET(rows);
+ drawNitrate(rows);
  drawStorage(rows);
  drawDepthReadings(rows);
 }

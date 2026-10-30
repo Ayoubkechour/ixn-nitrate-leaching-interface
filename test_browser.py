@@ -26,7 +26,7 @@ async def main():
             await page.goto(f'http://127.0.0.1:{port}',wait_until='networkidle')
             await page.screenshot(path=f'/tmp/ixn_{mode}_inputs.png',full_page=True)
             await page.locator('#exampleButton').click()
-            await page.wait_for_function("document.querySelector('#dataset').value === 'Synthetic example'")
+            await page.wait_for_function("document.querySelector('#dataset').value === 'Synthetic 2022 site-year'")
             await page.locator('[data-view="review"]').click()
             await page.screenshot(path=f'/tmp/ixn_{mode}_review.png',full_page=True)
             await page.evaluate("new MutationObserver(() => console.log('QA_PROGRESS ' + document.querySelector('#progressTitle').textContent)).observe(document.querySelector('#progressTitle'),{childList:true,subtree:true})")
@@ -43,17 +43,26 @@ async def main():
                 raise AssertionError(error)
             await page.screenshot(path=f'/tmp/ixn_{mode}_results.png',full_page=True)
             rows=await page.locator('#resultsTable tbody tr').count()
-            assert rows==3,(mode,rows)
-            assert await page.locator('#dailyPlot option').count()==3
+            assert rows==96,(mode,rows)
+            assert await page.locator('#dailyPlot option').count()==96
             await page.locator('[data-result-tab="daily"]').click()
             await page.locator('#dailyPlot').select_option(index=2)
             await page.wait_for_function("document.querySelector('#dailyTitle').textContent.includes('plot 103') && !!document.querySelector('#dailyChart svg')")
             assert await page.locator('#storageChart svg').count()==1
+            assert await page.locator('#etChart svg').count()==1
+            await page.locator('[data-et-view="cumulative"]').click()
+            assert await page.locator('#etChart svg').count()==1
+            await page.locator('[data-et-view="monthly"]').click()
             assert await page.locator('#depthChart svg').count()==1
+            assert await page.locator('#depthChart .axis-unit').inner_text()=='VWC %'
+            await page.locator('[data-depth-view="lines"]').click()
             assert await page.locator('#depthChartLegend span').count()==5
-            assert '108 model days' in await page.locator('#dailyCoverage').inner_text()
+            await page.locator('[data-depth-view="matrix"]').click()
+            assert await page.locator('#nitrateChart svg').count()==1
+            assert '169 model days' in await page.locator('#dailyCoverage').inner_text()
             await page.locator('[data-result-tab="comparison"]').click()
-            assert await page.locator('#comparisonTable tbody tr').count()==3
+            assert await page.locator('#comparisonTable tbody tr').count()==24
+            assert await page.locator('#comparisonMatrix .matrix-cell').count()==24
             await page.locator('#comparisonGroup').select_option('years')
             assert await page.locator('#comparisonTable tbody tr').count()==1
             stats=await page.evaluate("comparisonRows([null,0,4].map(value=>({...state.results.plot_year[0],Load_kg_ha:value})),'Load_kg_ha',false)[0]")
@@ -63,19 +72,19 @@ async def main():
                 await page.locator('#downloadComparison').click()
             await (await comparison_download.value).save_as(f'/tmp/ixn_{mode}_comparison.csv')
             await page.locator('#irrigationFilter').select_option('I2')
-            assert await page.locator('#dailyPlot option').count()==1
-            assert await page.locator('#resultsTable tbody tr').count()==1
-            await page.wait_for_function("document.querySelector('#dailyTitle').textContent.includes('plot 102') && !!document.querySelector('#dailyChart svg')")
+            assert await page.locator('#dailyPlot option').count()==24
+            assert await page.locator('#resultsTable tbody tr').count()==24
+            await page.wait_for_function("document.querySelector('#dailyTitle').textContent.includes('plot 107') && !!document.querySelector('#dailyChart svg')")
             await page.locator('#nitrogenFilter').select_option('N1')
-            assert await page.locator('#dailyPlot option').count()==0
-            assert 'No plot-year rows' in await page.locator('#coverageNote').inner_text()
+            assert await page.locator('#dailyPlot option').count()==4
+            assert await page.locator('#resultsTable tbody tr').count()==4
             await page.locator('#irrigationFilter').select_option('all')
             await page.locator('#nitrogenFilter').select_option('all')
             await page.locator('[data-result-tab="plots"]').click()
             await page.locator('#chartMetric').select_option('Drainage_mm')
-            assert await page.locator('#resultsTable tbody tr').count()==3
+            assert await page.locator('#resultsTable tbody tr').count()==96
             await page.locator('#resultFilter').select_option(index=1)
-            assert await page.locator('#resultsTable tbody tr').count()==3
+            assert await page.locator('#resultsTable tbody tr').count()==96
             async with page.expect_download() as download_info:
                 await page.locator('#downloadAll').click()
             download=await download_info.value

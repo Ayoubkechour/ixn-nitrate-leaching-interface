@@ -177,6 +177,7 @@ function renderResults(){
  const mean=key=>{const v=rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
  $('metricCards').innerHTML=[['Reported-analyte load','Load_kg_ha','kg/ha','Mean per plot · sampled intervals','accent'],['WB_ETa + fallback','WB_ETa_mm','mm',`${rows.filter(r=>r.WB_days>0).length}/${rows.length} plots with measured WB coverage`,''],['Modeled drainage','Drainage_mm','mm','Mean per plot · full model period',''],['Modeled ET','Model_ETa_mm','mm','Mean per plot · full model period','']].map(([label,key,unit,note,cls])=>`<div class="metric-card ${cls}"><div class="metric-label">${label}</div><div class="metric-value">${number(mean(key),key==='Load_kg_ha'?2:1)}<small>${unit}</small></div><p>${note}</p></div>`).join('');
  drawBars(rows,$('chartMetric').value);
+ renderTreatmentMatrix(rows,'Model_ETa_mm',siteETMatrix,true);
  const columns=[['Plot','Plot'],['Site','Site'],['Year','Year'],['Irrigation_treatment','Irrigation'],['Nitrogen_treatment','Nitrogen'],['Load_kg_ha','Load (kg/ha)'],['WB_ETa_mm','WB_ETa (mm)'],['Model_ETa_mm','ET (mm)'],['Drainage_mm','Drainage (mm)'],['WB_days','Measured WB days'],['Leaching_days','Nitrate coverage days'],['Result_status','Result status']];
  $('resultsTable').innerHTML=`<thead><tr>${columns.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(([key])=>`<td>${['Plot','Site','Year','Irrigation_treatment','Nitrogen_treatment','WB_days','Leaching_days','Result_status'].includes(key)?esc(r[key]):number(r[key])}</td>`).join('')}</tr>`).join('')}</tbody>`;
  const csvColumns=Object.keys(rows[0]||{});const quote=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[csvColumns.map(quote).join(','),...rows.map(r=>csvColumns.map(k=>quote(r[k])).join(','))].join('\r\n');addDownload('csv','\uFEFF'+csv,'text/csv;charset=utf-8');renderExplorer(rows);
@@ -207,13 +208,14 @@ function setResultTab(tab){state.resultTab=tab;document.querySelectorAll('[data-
 document.querySelectorAll('[data-result-tab]').forEach(b=>b.onclick=()=>setResultTab(b.dataset.resultTab));
 $('resultFilter').onchange=renderResults;$('chartMetric').onchange=()=>state.results&&drawBars(filteredRows(),$('chartMetric').value);
 $('downloadAll').onclick=()=>download('zip','ixn_results.zip');$('downloadExcel').onclick=()=>download('xlsx','ixn_results.xlsx');$('downloadPdf').onclick=()=>download('pdf','ixn_plot_year_report.pdf');$('downloadCsv').onclick=()=>download('csv','ixn_plot_year_results.csv');
+$('exampleButton').textContent='Load complete site-year demo';
 $('exampleButton').onclick=async()=>{
  if(state.busy)return;$('exampleButton').disabled=true;
  try{
   document.querySelector('[data-mode=tables]').click();
   for(const role of Object.keys(state.files))setFile(role,null);
   for(const role of ['weather','irrigation','nitrate','moisture','plots']){const r=await fetch(`templates/example_${role}.csv`);if(!r.ok)throw Error('Could not load example inputs.');setFile(role,new File([await r.blob()],`${role}.csv`,{type:'text/csv'}));}
-  $('dataset').value='Synthetic example';$('site').value='Demo field';$('planting_date').value='2022-05-16';$('end_date').value='2022-08-31';$('latitude_deg').value='45.34399';$('elevation_m').value='287.1216';$('wind_height_m').value='3';$('irrigation_complete').checked=true;$('nitrate_basis').value='NO3-N';$('concentration_units').value='mg/L';$('collection_dates_verified').checked=true;renderParameters();invalidateResults();showView('inputs');
+  $('dataset').value='Synthetic 2022 site-year';$('site').value='Demo research site';$('planting_date').value='2022-05-16';$('end_date').value='2022-10-31';$('latitude_deg').value='45.34399';$('elevation_m').value='287.1216';$('wind_height_m').value='3';$('irrigation_complete').checked=true;$('nitrate_basis').value='NO3-N';$('concentration_units').value='mg/L';$('collection_dates_verified').checked=true;renderParameters();invalidateResults();showView('inputs');
  }catch(e){failure(e.message);}finally{$('exampleButton').disabled=false;}
 };
 $('resetButton').onclick=()=>{if(state.busy)return;location.reload();};

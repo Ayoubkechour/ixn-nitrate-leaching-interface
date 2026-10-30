@@ -46,6 +46,11 @@ Choose prepared CSV/XLSX tables or the original Raw_data_NNI folder. The UI and
 One workbook with named Weather/Irrigation/Nitrate/Moisture/Plots sheets is
 also supported. Individual files override the corresponding workbook sheet.
 The included example and workbook contain synthetic data only.
+The built-in demonstration is a synthetic 2022 site-year trial: 96 plots across
+four irrigation treatments, six nitrogen treatments and four replicates. It
+includes full-calendar-year weather and analyzes the May 16–October 31 growing
+season, using April 1 preplant history. No real field measurements ship with
+the public website.
 The prepared soil-moisture input accepts the five raw PR2 VWC percentage columns
 from the `Westport` sheet of `Master_PR2_SM.xlsx` (6, 12, 18, 24 and 36 inches).
 Complete rows are integrated over the observed 0–0.9144 m depth, with the default
@@ -66,6 +71,18 @@ field prediction accuracy.
 
 Results can be filtered by site/year, irrigation and nitrogen treatment. The
 daily chart can show any plot in the selected results; records load on demand.
+The treatment matrix summarizes all plots in the selected site-year, with the
+mean and observation count in each irrigation × nitrogen cell. It defaults to
+modeled ET and can show the other metrics in the selector.
+The ET panel offers monthly totals and cumulative curves for modeled actual ET
+and weather-derived reference ET, inspired by OpenET's
+[Data Explorer](https://etdata.org/openet-data-explorer/). These IXN quantities
+are not OpenET satellite estimates.
+The daily workspace separates water fluxes (mm/day), discrete nitrate samples
+(mg/L), modeled versus measured profile storage (mm), and raw PR2 depth readings
+(VWC %). The depth-by-date matrix leaves absent readings blank and marks
+out-of-range values; a line view is available for depth trends. No samples are
+interpolated for display. Every chart uses a labeled unit and date or plot axis.
 The treatment/year tab reports counts, missing counts, mean, sample standard
 deviation and range for the selected metric, with a separate CSV export. These
 are descriptive summaries, not tests of treatment effects. The overview shows
@@ -95,6 +112,14 @@ execution paths using the optional Playwright dependency.
 
 The design workflow was informed by the NASA POWER Data Access Viewer and
 OpenET Data Explorer, with an original layout and visual styling.
+
+The chart design follows published examples and guidance: the
+[USGS water-quality trend viewer](https://apps.usgs.gov/trends/sw-quality/)
+plots observed concentrations against time separately from modeled values;
+[EPA data guidance](https://www.epa.gov/n-steps-online/data-considerations)
+recommends time-series review of extreme values and retaining quality context;
+and [soil-moisture visualization research](https://acsess.onlinelibrary.wiley.com/doi/full/10.2136/vzj2015.03.0037)
+describes time series and depth profiles as complementary views.
 
 - https://power.larc.nasa.gov/docs/tutorials/data-access-viewer/user-guide/
 - https://etdata.org/openet-data-explorer/

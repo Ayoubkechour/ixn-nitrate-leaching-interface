@@ -8,9 +8,9 @@ Required weather columns:
 Date,Tmax_C,Tmin_C,Wind_m_s,Rs_MJ_m2_day,Rain_mm,Tdew_C
 Instead of Tdew_C you may provide RHmin_pct,RHmax_pct. Paired RH takes priority.
 Units: Celsius, m/s, MJ/m2/day, mm/day. One unique consecutive date per day.
-Cover planting through analysis end and include preplant history. The original
-raw workflow starts April 1; the supplied weather start initializes the prepared
-tables calculation. Missing weather is an error, never zero-filled.
+Cover planting through analysis end and include preplant history. The IXN
+calculation initializes on April 1 when earlier weather is supplied; earlier
+rows remain in the input audit. Missing weather is an error, never zero-filled.
 
 Required irrigation columns: Date,Plot,Irrigation_mm
 One unique record per date/plot; this must be a complete event log. Days without
