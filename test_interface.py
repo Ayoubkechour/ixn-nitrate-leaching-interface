@@ -5,13 +5,14 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import pandas as pd
 
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE/'dist'/'python'))
-from interface_engine import analyze, prepared_tables, parameters_from_form, PR2_COLUMNS, PR2_WEIGHTS_MM, read_table
+from interface_engine import analyze, prepared_tables, parameters_from_form, PR2_COLUMNS, PR2_WEIGHTS_MM, read_table, monthly_et_table, json_records
 from leaching_model import Parameters
 from leaching_sources import Sources
 
@@ -114,10 +115,45 @@ class InputTests(unittest.TestCase):
 
     def test_pr2_profile_depth_is_reflected_in_results(self):
         with patch('interface_engine.draw_plot_year_figures',return_value=pd.DataFrame()):
-            result,_=analyze(self.config,self.root,lambda message:None)
+            result,archive=analyze(self.config,self.root,lambda message:None)
         self.assertTrue(all(abs(row['Model_profile_depth_m']-.9144)<1e-9 for row in result['plot_year']))
         self.assertIn('6in_VWC %',result['daily'][0])
         self.assertIn('ETo_mm',result['daily'][0])
+        observed=pd.read_csv(self.config['files']['moisture'])
+        first=next(row for row in result['daily'] if row['Date'].startswith('2022-05-20'))
+        original=observed.loc[(observed.Plot==101)&(observed.Date=='2022-05-20')].iloc[0]
+        for depth in PR2_COLUMNS:
+            self.assertAlmostEqual(first[depth],original[depth],msg=depth)
+        self.assertEqual(len(result['monthly_et']),12)  # 3 plots × May–August
+        with zipfile.ZipFile(archive) as exported:
+            self.assertIn('monthly_et.csv',exported.namelist())
+        for plot in [101,102,103]:
+            months=[row for row in result['monthly_et'] if row['Plot']==plot]
+            summary=next(row for row in result['plot_year'] if row['Plot']==plot)
+            self.assertEqual([row['Month'] for row in months],['2022-05','2022-06','2022-07','2022-08'])
+            self.assertEqual([row['Days'] for row in months],[16,30,31,31])
+            self.assertTrue(all(row['ETa_days']==row['ETo_days']==row['Days'] for row in months))
+            self.assertAlmostEqual(sum(row['ETa_model_mm'] for row in months),summary['Model_ETa_mm'],places=5)
+
+    def test_monthly_et_does_not_invent_zero_for_missing_measurements(self):
+        daily=pd.DataFrame([
+            dict(Date=pd.Timestamp('2022-06-01'),Dataset='Example',Site='Field',Year=2022,Plot=101,
+                 Irrigation_treatment='I1',Nitrogen_treatment='N1',ETa_model_mm=None,ETo_mm=None),
+            dict(Date=pd.Timestamp('2022-06-02'),Dataset='Example',Site='Field',Year=2022,Plot=101,
+                 Irrigation_treatment='I1',Nitrogen_treatment='N1',ETa_model_mm=None,ETo_mm=None),
+        ])
+        month=json_records(monthly_et_table(daily))[0]
+        self.assertIsNone(month['ETa_model_mm'])
+        self.assertIsNone(month['ETo_mm'])
+        self.assertEqual((month['Days'],month['ETa_days'],month['ETo_days']),(2,0,0))
+
+    def test_site_year_example_has_all_96_treatment_plots(self):
+        plan=pd.read_csv(HERE/'dist/templates/example_plots.csv')
+        self.assertEqual(len(plan),96)
+        self.assertEqual(plan.Plot.nunique(),96)
+        self.assertEqual(plan.Irrigation_treatment.nunique(),4)
+        self.assertEqual(plan.Nitrogen_treatment.nunique(),6)
+        self.assertTrue(plan.groupby(['Irrigation_treatment','Nitrogen_treatment']).size().eq(4).all())
 
     def test_pr2_rejects_unmatched_custom_profile(self):
         self.config['parameters']={'soil_bottom_m':[.3,.6,.9,1.1]}

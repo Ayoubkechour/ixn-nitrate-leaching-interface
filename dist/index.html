@@ -5,10 +5,11 @@
   <title>IXN · Nitrate & Water Balance</title>
   <meta name="description" content="A field-data workspace for IXN nitrate leaching, drainage and water-balance analysis.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js" defer></script>
-  <script src="profile_charts.js" defer></script>
-  <script src="results_explorer.js" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261030-results3">
+  <script src="app.js?v=20261030-results3" defer></script>
+  <script src="profile_charts.js?v=20261030-results3" defer></script>
+  <script src="results_explorer.js?v=20261030-results3" defer></script>
+  <script src="site_et.js?v=20261030-results3" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -20,13 +21,13 @@
       <button class="nav-item" data-view="review"><span class="nav-number">03</span><span>Review & run<small>Check before calculating</small></span></button>
       <button class="nav-item" data-view="results"><span class="nav-number">04</span><span>Results<small>Explore & download</small></span><span id="resultsDot" class="nav-dot hidden"></span></button>
     </nav>
-    <div class="side-bottom"><div class="engine-tag"><span></span>IXN calculation engine</div><p>Water balance, drainage<br>and nitrate leaching.</p><a href="#guide" id="guideLink">Input guide <span>↗</span></a><div class="side-version">RESEARCH WORKSPACE · v1.0</div></div>
+    <div class="side-bottom"><div class="engine-tag"><span></span>IXN calculation engine</div><p>Water balance, drainage<br>and nitrate leaching.</p><a href="#guide" id="guideLink">Input guide <span>↗</span></a><div class="side-version">RESEARCH WORKSPACE · 96-PLOT RELEASE</div></div>
   </aside>
   <div class="shell">
     <header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span>Nitrate & water balance</div><div class="top-actions"><span id="runtimeBadge" class="badge">Runs in your browser</span><button class="text-button" id="resetButton">New analysis</button></div></header>
     <main>
       <section class="view" id="view-inputs">
-        <div class="page-heading"><div><div class="eyebrow">FROM FIELD OBSERVATIONS TO RESULTS</div><h1>Your analysis starts here.</h1><p>Calculate evapotranspiration, drainage and nitrate load from your field observations.</p></div><button class="secondary" id="exampleButton"><span>↗</span> Load example</button></div>
+        <div class="page-heading"><div><div class="eyebrow">FROM FIELD OBSERVATIONS TO RESULTS</div><h1>Your analysis starts here.</h1><p>Calculate evapotranspiration, drainage and nitrate load from your field observations.</p><div class="release-note">NEW · Explore a 96-plot site study with monthly ET, nitrate observations, soil moisture depths and custom X/Y charts. Load the complete demo to see Results.</div></div><button class="secondary" id="exampleButton"><span>↗</span> Load 96-plot demo</button></div>
         <div class="workspace-grid"><div>
           <div class="mode-switch" role="group" aria-label="Input format"><button class="selected" data-mode="tables">Prepared tables<span>CSV or Excel</span></button><button data-mode="raw">Raw IXN folder<span>Existing project structure</span></button></div>
           <div id="tableInputs">

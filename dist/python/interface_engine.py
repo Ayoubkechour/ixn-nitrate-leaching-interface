@@ -152,6 +152,20 @@ def json_records(table):
     return json.loads(table.to_json(orient='records', date_format='iso'))
 
 
+def monthly_et_table(daily):
+    """Plot-month ET totals with explicit coverage for charting and export."""
+    monthly = daily.copy()
+    monthly['Month'] = monthly.Date.dt.strftime('%Y-%m')
+    keys = ['Dataset', 'Site', 'Year', 'Plot', 'Irrigation_treatment', 'Nitrogen_treatment', 'Month']
+    return monthly.groupby(keys, as_index=False).agg(
+        ETa_model_mm=('ETa_model_mm', lambda values: values.sum(min_count=1)),
+        ETo_mm=('ETo_mm', lambda values: values.sum(min_count=1)),
+        Days=('Date', 'size'),
+        ETa_days=('ETa_model_mm', 'count'),
+        ETo_days=('ETo_mm', 'count'),
+    )
+
+
 def analyze(request, workspace, progress=print):
     workspace = Path(workspace)
     output = workspace / 'results'
@@ -388,6 +402,8 @@ def analyze(request, workspace, progress=print):
     # Load daily charts on demand rather than sending every plot to the browser.
     preview_folder = workspace/'daily_previews'
     preview_folder.mkdir(exist_ok=True)
+    monthly_et = monthly_et_table(daily)
+    monthly_et.to_csv(output/'monthly_et.csv', index=False)
     daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETo_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L'] + PR2_COLUMNS
     identities = ['Dataset', 'Site', 'Year', 'Plot']
     daily_plots = []
@@ -399,6 +415,7 @@ def analyze(request, workspace, progress=print):
     first_preview = next(item for item in daily_plots if all(item[key] == first[key] for key in identities))
     payload = dict(plot_year=json_records(plot_year), checks=json_records(checks), issues=json_records(quality),
         daily=json.loads((preview_folder/(first_preview['id']+'.json')).read_text()),
+        monthly_et=json_records(monthly_et),
         daily_plots=json_records(pd.DataFrame(daily_plots)), daily_id=first_preview['id'],
         daily_plot=int(first.Plot), daily_rows=len(daily),
         figures=[str(path.relative_to(output)) for path in sorted(output.rglob('*.png'))],

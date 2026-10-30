@@ -157,7 +157,7 @@ $('runButton').onclick=async()=>{
  try{
   const uploads=await collectUploads();
   if(state.local){await runLocal(config,uploads);return;}
-  if(!state.worker){state.worker=new Worker('worker.js',{type:'module'});state.worker.onmessage=e=>{const m=e.data;if(m.type==='daily'||m.type==='daily_error'){receiveDaily(m);return;}if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};state.worker.onerror=e=>{failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);state.worker.terminate();state.worker=null;};}
+  if(!state.worker){state.worker=new Worker('worker.js?v=20261030-results3',{type:'module'});state.worker.onmessage=e=>{const m=e.data;if(m.type==='daily'||m.type==='daily_error'){receiveDaily(m);return;}if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};state.worker.onerror=e=>{failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);state.worker.terminate();state.worker=null;};}
   state.worker.postMessage({type:'run',config,uploads},uploads.map(f=>f.bytes.buffer));
  }catch(e){failure(e.message);}
 };
@@ -176,7 +176,8 @@ function renderResults(){
  if(!state.results)return;const rows=filteredRows();
  const mean=key=>{const v=rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
  $('metricCards').innerHTML=[['Reported-analyte load','Load_kg_ha','kg/ha','Mean per plot · sampled intervals','accent'],['WB_ETa + fallback','WB_ETa_mm','mm',`${rows.filter(r=>r.WB_days>0).length}/${rows.length} plots with measured WB coverage`,''],['Modeled drainage','Drainage_mm','mm','Mean per plot · full model period',''],['Modeled ET','Model_ETa_mm','mm','Mean per plot · full model period','']].map(([label,key,unit,note,cls])=>`<div class="metric-card ${cls}"><div class="metric-label">${label}</div><div class="metric-value">${number(mean(key),key==='Load_kg_ha'?2:1)}<small>${unit}</small></div><p>${note}</p></div>`).join('');
- drawBars(rows,$('chartMetric').value);
+ drawXYChart(rows);
+ renderSiteET(rows,state.results);
  renderTreatmentMatrix(rows,'Model_ETa_mm',siteETMatrix,true);
  const columns=[['Plot','Plot'],['Site','Site'],['Year','Year'],['Irrigation_treatment','Irrigation'],['Nitrogen_treatment','Nitrogen'],['Load_kg_ha','Load (kg/ha)'],['WB_ETa_mm','WB_ETa (mm)'],['Model_ETa_mm','ET (mm)'],['Drainage_mm','Drainage (mm)'],['WB_days','Measured WB days'],['Leaching_days','Nitrate coverage days'],['Result_status','Result status']];
  $('resultsTable').innerHTML=`<thead><tr>${columns.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(([key])=>`<td>${['Plot','Site','Year','Irrigation_treatment','Nitrogen_treatment','WB_days','Leaching_days','Result_status'].includes(key)?esc(r[key]):number(r[key])}</td>`).join('')}</tr>`).join('')}</tbody>`;
@@ -204,9 +205,10 @@ function drawDaily(rows){
  for(let i=0;i<rows.length;i+=Math.max(1,Math.ceil(rows.length/7)))svg+=`<text x="${x(i)}" y="${h-11}" text-anchor="middle">${esc(rows[i].Date.slice(5,10))}</text>`;
  svg+='</svg>';$('dailyChart').innerHTML=svg;
 }
-function setResultTab(tab){state.resultTab=tab;document.querySelectorAll('[data-result-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.resultTab===tab));for(const name of ['plots','comparison','daily','quality'])$(`results-${name}`).classList.toggle('hidden',tab!==name);}
+document.querySelector('.tab-group').innerHTML='<button class="selected" data-result-tab="plots">Overview</button><button data-result-tab="daily">ET & water</button><button data-result-tab="observations">Nitrate & soil</button><button data-result-tab="comparison">Treatments</button><button data-result-tab="data">Data & quality</button>';
+function setResultTab(tab){state.resultTab=tab;document.querySelectorAll('[data-result-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.resultTab===tab));for(const name of ['plots','daily','observations','comparison','data'])$(`results-${name}`).classList.toggle('hidden',tab!==name);const picker=$('plotSelectorRow');if(picker)picker.classList.toggle('hidden',tab!=='daily'&&tab!=='observations');}
 document.querySelectorAll('[data-result-tab]').forEach(b=>b.onclick=()=>setResultTab(b.dataset.resultTab));
-$('resultFilter').onchange=renderResults;$('chartMetric').onchange=()=>state.results&&drawBars(filteredRows(),$('chartMetric').value);
+$('resultFilter').onchange=renderResults;$('chartMetric').onchange=()=>state.results&&drawXYChart(filteredRows());
 $('downloadAll').onclick=()=>download('zip','ixn_results.zip');$('downloadExcel').onclick=()=>download('xlsx','ixn_results.xlsx');$('downloadPdf').onclick=()=>download('pdf','ixn_plot_year_report.pdf');$('downloadCsv').onclick=()=>download('csv','ixn_plot_year_results.csv');
 $('exampleButton').textContent='Load complete site-year demo';
 $('exampleButton').onclick=async()=>{
