@@ -166,6 +166,50 @@ def monthly_et_table(daily):
     )
 
 
+def daily_leaching_estimates(daily, intervals):
+    """Reconstruct interval load by day without extrapolating concentration.
+
+    This is a modeled estimate from the selected interval convention, not a
+    daily nitrate measurement. Days outside two valid sample endpoints stay
+    missing even when modeled drainage is available.
+    """
+    daily = daily.copy()
+    concentration = 'Nitrate_concentration_estimated_mg_L'
+    load = 'Nitrate_load_estimated_kg_ha_day'
+    method = 'Nitrate_concentration_method'
+    basis = 'Nitrate_load_basis'
+    daily[concentration] = np.nan
+    daily[load] = np.nan
+    daily[method] = None
+    daily[basis] = None
+    if intervals.empty:
+        return daily
+    identities = ['Dataset', 'Site', 'Year', 'Plot']
+    by_plot = {key: group for key, group in intervals.groupby(identities, sort=False)}
+    for key, group in daily.groupby(identities, sort=False):
+        for interval in by_plot.get(key, pd.DataFrame()).itertuples(index=False):
+            start, end = pd.Timestamp(interval.Start_date), pd.Timestamp(interval.End_date)
+            selected = group.index[(group.Date > start) & (group.Date <= end)]
+            if len(selected) != interval.Days:
+                raise ValueError('Nitrate interval does not match modeled daily dates for plot ' + str(key))
+            dates = daily.loc[selected, 'Date']
+            if interval.Concentration_method == 'end_sample':
+                values = np.full(len(selected), interval.End_concentration_mg_L, dtype=float)
+            elif interval.Concentration_method == 'linear':
+                fraction = ((dates - start) / (end - start)).to_numpy(dtype=float)
+                values = interval.Start_concentration_mg_L + (interval.End_concentration_mg_L - interval.Start_concentration_mg_L) * fraction
+            else:
+                raise ValueError('Unsupported nitrate concentration method in interval results.')
+            loads = 0.01 * values * daily.loc[selected, 'Drainage_mm'].to_numpy(dtype=float)
+            if not np.isclose(loads.sum(), interval.Load_reported_analyte_kg_ha, rtol=1e-10, atol=1e-8):
+                raise ValueError('Daily nitrate load does not reconcile with interval result for plot ' + str(key))
+            daily.loc[selected, concentration] = values
+            daily.loc[selected, load] = loads
+            daily.loc[selected, method] = interval.Concentration_method
+            daily.loc[selected, basis] = interval.Concentration_basis
+    return daily
+
+
 def analyze(request, workspace, progress=print):
     workspace = Path(workspace)
     output = workspace / 'results'
@@ -211,6 +255,7 @@ def analyze(request, workspace, progress=print):
         results = run(cfg, p, progress)
         plot_year = results['plot_year']
         daily = results['daily']
+        load_intervals = results['leaching']
         checks = results['checks']
         quality = results['data_quality']
     elif mode == 'tables':
@@ -369,6 +414,7 @@ def analyze(request, workspace, progress=print):
         daily = pd.concat(all_daily, ignore_index=True)
         wb = pd.concat(all_wb, ignore_index=True)
         load = pd.concat(all_load, ignore_index=True) if all_load else pd.DataFrame()
+        load_intervals = load
         summary = pd.DataFrame(summaries)
         plot_year = plot_year_table(summary)
         checks = scientific_checks(daily, wb, load)
@@ -402,9 +448,12 @@ def analyze(request, workspace, progress=print):
     # Load daily charts on demand rather than sending every plot to the browser.
     preview_folder = workspace/'daily_previews'
     preview_folder.mkdir(exist_ok=True)
+    daily = daily_leaching_estimates(daily, load_intervals)
+    daily.to_csv(output/'daily_explorer.csv.gz', index=False, compression='gzip')
     monthly_et = monthly_et_table(daily)
     monthly_et.to_csv(output/'monthly_et.csv', index=False)
-    daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETo_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L'] + PR2_COLUMNS
+    daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETo_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L',
+                     'Nitrate_concentration_estimated_mg_L', 'Nitrate_load_estimated_kg_ha_day', 'Nitrate_concentration_method', 'Nitrate_load_basis'] + PR2_COLUMNS
     identities = ['Dataset', 'Site', 'Year', 'Plot']
     daily_plots = []
     for index, (identity, group) in enumerate(daily.groupby(identities, sort=True)):

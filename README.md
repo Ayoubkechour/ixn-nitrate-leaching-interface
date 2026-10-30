@@ -71,6 +71,14 @@ field prediction accuracy.
 
 Results can be filtered by site/year, irrigation and nitrogen treatment. The
 daily chart can show any plot in the selected results; records load on demand.
+The Scientific explorer aligns selected water fluxes, estimated nitrate load,
+measured nitrate concentration, and raw PR2 depth readings by date for one plot.
+Variables can be switched on or off; each unit keeps its own labeled panel.
+Estimated load appears only within valid paired sample intervals and remains
+distinct from the measured concentration points.
+The Data & quality view also offers configurable X and Y axes for plot-year
+comparisons. Categorical axes show means and counts; numeric axes show
+individual plot-year points, with incomplete pairs excluded.
 The treatment matrix summarizes all plots in the selected site-year, with the
 mean and observation count in each irrigation × nitrogen cell. It defaults to
 modeled ET and can show the other metrics in the selector.

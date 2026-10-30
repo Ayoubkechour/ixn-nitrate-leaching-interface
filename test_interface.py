@@ -12,7 +12,7 @@ import pandas as pd
 
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE/'dist'/'python'))
-from interface_engine import analyze, prepared_tables, parameters_from_form, PR2_COLUMNS, PR2_WEIGHTS_MM, read_table, monthly_et_table, json_records
+from interface_engine import analyze, prepared_tables, parameters_from_form, PR2_COLUMNS, PR2_WEIGHTS_MM, read_table, monthly_et_table, daily_leaching_estimates, json_records
 from leaching_model import Parameters
 from leaching_sources import Sources
 
@@ -127,6 +127,16 @@ class InputTests(unittest.TestCase):
         self.assertEqual(len(result['monthly_et']),12)  # 3 plots × May–August
         with zipfile.ZipFile(archive) as exported:
             self.assertIn('monthly_et.csv',exported.namelist())
+            self.assertIn('daily_explorer.csv.gz',exported.namelist())
+            intervals=pd.read_csv(exported.open('leaching_intervals.csv'))
+        daily_load=[row['Nitrate_load_estimated_kg_ha_day'] for row in result['daily']]
+        self.assertTrue(all(value is None for value in daily_load[:5]))
+        self.assertTrue(any(value is not None for value in daily_load[5:]))
+        self.assertAlmostEqual(sum(value for value in daily_load if value is not None),
+                               intervals.loc[intervals.Plot.eq(101),'Load_reported_analyte_kg_ha'].sum(),places=7)
+        first_covered=next(row for row in result['daily'] if row['Nitrate_load_estimated_kg_ha_day'] is not None)
+        self.assertEqual(first_covered['Nitrate_concentration_method'],'end_sample')
+        self.assertEqual(first_covered['Nitrate_load_basis'],'unverified')
         for plot in [101,102,103]:
             months=[row for row in result['monthly_et'] if row['Plot']==plot]
             summary=next(row for row in result['plot_year'] if row['Plot']==plot)
@@ -146,6 +156,19 @@ class InputTests(unittest.TestCase):
         self.assertIsNone(month['ETa_model_mm'])
         self.assertIsNone(month['ETo_mm'])
         self.assertEqual((month['Days'],month['ETa_days'],month['ETo_days']),(2,0,0))
+
+    def test_linear_daily_nitrate_estimates_only_cover_paired_interval(self):
+        identity=dict(Dataset='Example',Site='Field',Year=2022,Plot=101)
+        daily=pd.DataFrame([dict(identity,Date=pd.Timestamp(f'2022-06-0{day}'),Drainage_mm=2.0)
+                            for day in range(1,5)])
+        intervals=pd.DataFrame([dict(identity,Start_date=pd.Timestamp('2022-06-01'),End_date=pd.Timestamp('2022-06-03'),
+                                     Days=2,Start_concentration_mg_L=10.0,End_concentration_mg_L=20.0,
+                                     Concentration_method='linear',Concentration_basis='NO3-N',
+                                     Load_reported_analyte_kg_ha=.7)])
+        result=json_records(daily_leaching_estimates(daily,intervals))
+        self.assertEqual([row['Nitrate_concentration_estimated_mg_L'] for row in result],[None,15.0,20.0,None])
+        self.assertEqual([row['Nitrate_load_estimated_kg_ha_day'] for row in result],[None,.3,.4,None])
+        self.assertEqual([row['Nitrate_load_basis'] for row in result],[None,'NO3-N','NO3-N',None])
 
     def test_site_year_example_has_all_96_treatment_plots(self):
         plan=pd.read_csv(HERE/'dist/templates/example_plots.csv')
@@ -179,6 +202,7 @@ class InputTests(unittest.TestCase):
             records=json.loads((self.root/'daily_previews'/(item['id']+'.json')).read_text())
             self.assertEqual(len(records),108)
             self.assertTrue(all(row['Nitrate_mg_L'] is None for row in records))
+            self.assertTrue(all(row['Nitrate_load_estimated_kg_ha_day'] is None for row in records))
 
     def test_microgram_conversion_and_flagged_blank_irrigation(self):
         def edit(d):d.loc[0,'Irrigation_mm']=None;return d

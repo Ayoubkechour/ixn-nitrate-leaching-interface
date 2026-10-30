@@ -1,6 +1,11 @@
 /* Plot selection, coverage and descriptive comparisons share the same run. */
 'use strict';
 Object.assign(state,{dailyCache:new Map(),dailyRequest:0,completedJob:null});
+const scientificView=document.createElement('div');
+scientificView.id='results-explorer';
+scientificView.className='hidden';
+document.querySelector('#results-plots').after(scientificView);
+document.querySelector('#results-plots').prepend($('metricCards'),$('coverageNote'));
 const observationView=document.createElement('div');
 observationView.id='results-observations';
 observationView.className='hidden';
@@ -156,6 +161,7 @@ function displayDaily(rows,metadata){
  drawNitrate(rows);
  drawStorage(rows);
  drawDepthReadings(rows);
+ if(window.drawScientificExplorer)window.drawScientificExplorer(rows,metadata,summary);
 }
 async function updateDailyPlot(){
  const id=$('dailyPlot').value,request=++state.dailyRequest;

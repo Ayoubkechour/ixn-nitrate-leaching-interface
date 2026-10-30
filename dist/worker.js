@@ -17,7 +17,8 @@ async function runtime(){
   }
   py.FS.mkdirTree('/ixn');
   for(const name of ['leaching_model.py','leaching_pipeline.py','leaching_sources.py','leaching_results.py','workbook_validation.py','interface_engine.py']){
-   const response=await fetch(new URL('python/'+name,self.location.href));if(!response.ok)throw Error('Cannot load the IXN engine.');py.FS.writeFile('/ixn/'+name,await response.text());
+   const sourceURL=new URL('python/'+name,self.location.href);sourceURL.search=self.location.search;
+   const response=await fetch(sourceURL);if(!response.ok)throw Error('Cannot load the IXN engine.');py.FS.writeFile('/ixn/'+name,await response.text());
   }
   py.runPython("import sys, os; sys.path.insert(0, '/ixn'); os.environ['MPLBACKEND']='Agg'");
   return py;

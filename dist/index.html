@@ -5,15 +5,16 @@
   <title>IXN · Nitrate & Water Balance</title>
   <meta name="description" content="A field-data workspace for IXN nitrate leaching, drainage and water-balance analysis.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20261030-results3">
-  <script src="app.js?v=20261030-results3" defer></script>
-  <script src="profile_charts.js?v=20261030-results3" defer></script>
-  <script src="results_explorer.js?v=20261030-results3" defer></script>
-  <script src="site_et.js?v=20261030-results3" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261030-results4">
+  <script src="app.js?v=20261030-results4" defer></script>
+  <script src="profile_charts.js?v=20261030-results4" defer></script>
+  <script src="results_explorer.js?v=20261030-results4" defer></script>
+  <script src="site_et.js?v=20261030-results4" defer></script>
+  <script src="scientific_explorer.js?v=20261030-results4" defer></script>
 </head>
 <body>
   <aside class="sidebar">
-    <a class="brand" href="#inputs" aria-label="IXN analysis home"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3C15 12 7 19 7 26a13 13 0 0 0 26 0C33 19 25 12 20 3Z" fill="#b7d6b5"/><path d="M13 26c6 0 12-6 14-10-1 10-5 17-13 16" fill="none" stroke="#16372d" stroke-width="2"/></svg><span>IXN<span class="brand-sub">FIELD ANALYTICS</span></span></a>
+    <a class="brand" href="#inputs" aria-label="IXN analysis home"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3C15 12 7 19 7 26a13 13 0 0 0 26 0C33 19 25 12 20 3Z" fill="#d8a363"/><path d="M13 26c6 0 12-6 14-10-1 10-5 17-13 16" fill="none" stroke="#6d001f" stroke-width="2"/></svg><span>IXN<span class="brand-sub">FIELD ANALYTICS</span></span></a>
     <div class="side-label">ANALYSIS WORKSPACE</div>
     <nav aria-label="Analysis steps">
       <button class="nav-item active" data-view="inputs"><span class="nav-number">01</span><span>Data & study setup<small>Upload your field inputs</small></span><span class="nav-dot" id="inputDot"></span></button>
@@ -29,7 +30,8 @@
       <section class="view" id="view-inputs">
         <div class="page-heading"><div><div class="eyebrow">FROM FIELD OBSERVATIONS TO RESULTS</div><h1>Your analysis starts here.</h1><p>Calculate evapotranspiration, drainage and nitrate load from your field observations.</p><div class="release-note">NEW · Explore a 96-plot site study with monthly ET, nitrate observations, soil moisture depths and custom X/Y charts. Load the complete demo to see Results.</div></div><button class="secondary" id="exampleButton"><span>↗</span> Load 96-plot demo</button></div>
         <div class="workspace-grid"><div>
-          <div class="mode-switch" role="group" aria-label="Input format"><button class="selected" data-mode="tables">Prepared tables<span>CSV or Excel</span></button><button data-mode="raw">Raw IXN folder<span>Existing project structure</span></button></div>
+          <div class="mode-switch hidden" role="group" aria-label="Input format"><button class="selected" data-mode="tables">Tables</button></div>
+          <p class="input-intro">Use your own site data in CSV or Excel. Upload separate tables or one workbook; the plots and dates come from your files.</p>
           <div id="tableInputs">
             <section class="card"><div class="card-title"><span class="section-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 21s7-7 7-12A7 7 0 0 0 5 9c0 5 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></span><div><h2>Study details</h2><p>Define the field and the period you want to analyze.</p></div></div>
               <div class="form-grid"><label>Dataset name<input id="dataset" value="IXN" maxlength="80" required></label><label>Site / field name<input id="site" placeholder="e.g. Becker" maxlength="80" required></label><label>Planting date<input id="planting_date" type="date" value="2022-05-16" required></label><label>Analysis end date<input id="end_date" type="date" value="2022-10-31" required></label></div>
