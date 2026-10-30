@@ -46,21 +46,30 @@ chartActions.innerHTML='<button type="button" class="text-button" id="downloadXY
 $('plotChart').after(chartActions);
 const identityKey=row=>JSON.stringify([row.Dataset,row.Site,row.Year,row.Plot]);
 const finiteValue=value=>typeof value==='number'&&Number.isFinite(value);
+function sampleSummary(values){
+ const n=values.length,mean=n?values.reduce((sum,value)=>sum+value,0)/n:null;
+ const sd=n>1?Math.sqrt(values.reduce((sum,value)=>sum+(value-mean)**2,0)/(n-1)):null;
+ return {n,mean,sd};
+}
 function drawXYChart(rows){
  state.xyExport=null;
  const xKey=$('chartX').value,yKey=$('chartMetric').value,target=$('plotChart');
  const xLabel=$('chartX').selectedOptions[0].text,yLabel=$('chartMetric').selectedOptions[0].text;
  const valid=rows.filter(row=>finiteValue(row[yKey])&&(xKey==='Plot'||['Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey)||finiteValue(row[xKey])));
  const omitted=rows.length-valid.length;
- $('chartContext').textContent=`${xLabel} × ${yLabel} · ${valid.length} of ${rows.length} plot-year rows shown${omitted?` · ${omitted} with missing values excluded`:''}. ${['Plot','Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey)?'Categorical values are means where grouped; n is shown in tooltips.':'Each point is one plot-year; color denotes irrigation treatment.'}`;
+ const categorical=['Plot','Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey);
+ const chartCard=typeof target.closest==='function'?target.closest('.card'):null;
+ const chartIntro=chartCard&&typeof chartCard.querySelector==='function'?chartCard.querySelector('.card-title p'):null;
+ if(chartIntro)chartIntro.textContent=xKey==='Plot'?'Each bar shows one plot-year value. Missing values stay missing.':categorical?'Bars show grouped plot-year means with ±1 sample SD across the selected rows.':'Each point shows one plot-year with a complete X/Y pair.';
+ const uncertaintyNote=xKey==='Plot'?'Each bar is one plot-year (n = 1); SD is unavailable for individual rows.':categorical?'Bars show mean ± 1 sample SD (n − 1). SD is unavailable for n < 2; n counts selected plot-year rows.':'Each point is one plot-year; color denotes irrigation treatment.';
+ $('chartContext').textContent=`${xLabel} × ${yLabel} · ${valid.length} of ${rows.length} plot-year rows shown${omitted?` · ${omitted} with missing values excluded`:''}. ${uncertaintyNote}`;
  $('downloadXYFigure').disabled=$('downloadXYPairs').disabled=!valid.length;
  if(!valid.length){target.innerHTML='<div class="chart-empty">No complete X/Y pairs match these filters. Missing values are not plotted as zero.</div>';return;}
- const categorical=['Plot','Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey);
  const groups=new Map();
- if(categorical)for(const row of valid){const label=xKey==='Plot'?`${row.Plot}`:String(row[xKey]);const key=xKey==='Plot'?`${row.Dataset} / ${row.Site} / ${row.Year} / ${label}`:label;if(!groups.has(key))groups.set(key,{label,values:[],rows:[]});const group=groups.get(key);group.values.push(row[yKey]);group.rows.push(row);}
- const data=categorical?[...groups.values()].map(g=>({...g,value:g.values.reduce((a,b)=>a+b,0)/g.values.length})).sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true})):valid;
+ if(categorical&&xKey!=='Plot')for(const row of valid){const label=String(row[xKey]);if(!groups.has(label))groups.set(label,{label,values:[],rows:[]});const group=groups.get(label);group.values.push(row[yKey]);group.rows.push(row);}
+ const data=categorical?(xKey==='Plot'?valid.map(row=>({label:String(row.Plot),rows:[row],value:row[yKey],n:1,sd:null})):[...groups.values()].map(g=>{const stats=sampleSummary(g.values);return {...g,value:stats.mean,n:stats.n,sd:stats.sd};})).sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true})):valid;
  const w=Math.max(820,categorical?data.length*15+110:820),h=320,left=70,right=25,top=32,bottom=266;
- const yMin=Math.min(0,...data.map(d=>categorical?d.value:d[yKey]));let yMax=Math.max(0,...data.map(d=>categorical?d.value:d[yKey]));
+ const yMin=Math.min(0,...data.map(d=>categorical?d.value-(d.sd===null?0:d.sd):d[yKey]));let yMax=Math.max(0,...data.map(d=>categorical?d.value+(d.sd===null?0:d.sd):d[yKey]));
  if(yMax===yMin)yMax=yMin+1;
  const yRange=yMax-yMin||1,y=v=>bottom-(v-yMin)/yRange*(bottom-top);
  const xValues=categorical?[]:data.map(row=>row[xKey]);let xMin=categorical?0:Math.min(...xValues),xMax=categorical?1:Math.max(...xValues);
@@ -70,11 +79,18 @@ function drawXYChart(rows){
  const precision=span=>Math.max(0,Math.min(6,1-Math.floor(Math.log10(Math.abs(span)/4))));
  const yDigits=precision(yRange),xDigits=precision(xRange);
  const palette={I1:'#6d001f',I2:'#a65a43',I3:'#956e34',I4:'#718072'};
- let svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(yLabel)} by ${esc(xLabel)}"><title>${esc(yLabel)} by ${esc(xLabel)}</title><text x="${left}" y="17" class="axis-unit">${esc(yLabel)}</text>`;
+ let svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(yLabel)} by ${esc(xLabel)}"><title>${esc(yLabel)} by ${esc(xLabel)}</title><desc>${esc(uncertaintyNote)}</desc><text x="${left}" y="17" class="axis-unit">${esc(yLabel)}</text>${categorical?`<text x="${w-right}" y="17" text-anchor="end">${xKey==='Plot'?'Individual plot-years · SD unavailable (n = 1)':'Mean ± 1 sample SD'}</text>`:''}`;
  for(let t=0;t<=4;t++){const value=yMin+(yMax-yMin)*t/4;svg+=`<line x1="${left}" y1="${y(value)}" x2="${w-right}" y2="${y(value)}" stroke="#eee7e2"/><text x="${left-9}" y="${y(value)+4}" text-anchor="end">${number(value,yDigits)}</text>`;}
  if(categorical){
   const step=(w-left-right)/data.length,bw=Math.max(3,Math.min(34,step*.7));
-  data.forEach((d,i)=>{const cx=left+(i+.5)*step,barY=y(d.value),zero=y(0),fill=xKey==='Plot'?(palette[d.rows[0].Irrigation_treatment]||'#6d001f'):'#8b3851';svg+=`<rect x="${cx-bw/2}" y="${Math.min(barY,zero)}" width="${bw}" height="${Math.max(1,Math.abs(barY-zero))}" rx="2" fill="${fill}"><title>${esc(d.label)} · mean ${number(d.value,2)} · n=${d.values.length}</title></rect>`;if(i%Math.max(1,Math.ceil(data.length/18))===0)svg+=`<text x="${cx}" y="${bottom+20}" text-anchor="middle">${esc(d.label)}</text>`;});
+  data.forEach((d,i)=>{
+   const cx=left+(i+.5)*step,barY=y(d.value),zero=y(0),fill=xKey==='Plot'?(palette[d.rows[0].Irrigation_treatment]||'#6d001f'):'#8b3851';
+   const identity=xKey==='Plot'?`${d.rows[0].Dataset} / ${d.rows[0].Site} ${d.rows[0].Year} · plot ${d.label}`:d.label;
+   const summary=`${identity} · ${xKey==='Plot'?'value':'mean'} ${number(d.value,2)} · n=${d.n} · ${d.sd===null?'SD unavailable (n < 2)':`sample SD ${number(d.sd,2)} · mean ± 1 SD [${number(d.value-d.sd,2)}, ${number(d.value+d.sd,2)}]`}`;
+   svg+=`<rect x="${cx-bw/2}" y="${Math.min(barY,zero)}" width="${bw}" height="${Math.max(1,Math.abs(barY-zero))}" rx="2" fill="${fill}"><title>${esc(summary)}</title></rect>`;
+   if(d.sd!==null){const low=y(d.value-d.sd),high=y(d.value+d.sd),cap=Math.max(4,Math.min(8,bw/2));svg+=`<g class="sd-whisker" fill="none" stroke="#35272d" stroke-width="1.6"><title>${esc(summary)}</title><line x1="${cx}" y1="${high}" x2="${cx}" y2="${low}"/><line x1="${cx-cap}" y1="${high}" x2="${cx+cap}" y2="${high}"/><line x1="${cx-cap}" y1="${low}" x2="${cx+cap}" y2="${low}"/></g>`;}
+   if(i%Math.max(1,Math.ceil(data.length/18))===0)svg+=`<text x="${cx}" y="${bottom+20}" text-anchor="middle">${esc(d.label)}${xKey==='Plot'?'':` · n=${d.n}`}</text>`;
+  });
  }else{
   for(let t=0;t<=4;t++){const value=xMin+(xMax-xMin)*t/4;svg+=`<line x1="${x(value)}" y1="${top}" x2="${x(value)}" y2="${bottom}" stroke="#f5f0ec"/><text x="${x(value)}" y="${bottom+20}" text-anchor="middle">${number(value,xDigits)}</text>`;}
   for(const row of data){const color=palette[row.Irrigation_treatment]||'#6d001f';svg+=`<circle cx="${x(row[xKey])}" cy="${y(row[yKey])}" r="4.4" fill="${color}" fill-opacity=".77" stroke="#fff" stroke-width="1"><title>${esc(row.Site)} ${row.Year} plot ${esc(row.Plot)} · ${xLabel}: ${number(row[xKey],2)} · ${yLabel}: ${number(row[yKey],2)}</title></circle>`;}
@@ -83,12 +99,13 @@ function drawXYChart(rows){
  const treatments=[...new Set(valid.map(row=>String(row.Irrigation_treatment)))].sort();
  const legend=xKey==='Plot'||!categorical?`<div class="chart-key"><span>Irrigation treatment</span>${treatments.map(label=>`<span><i style="background:${palette[label]||'#6d001f'}"></i>${esc(label)}</span>`).join('')}</div>`:'';
  target.innerHTML=legend+svg;
- const sources=valid.map(row=>({Dataset:row.Dataset,Site:row.Site,Year:row.Year,Plot:row.Plot,Irrigation_treatment:row.Irrigation_treatment,Nitrogen_treatment:row.Nitrogen_treatment,[xKey]:row[xKey],[yKey]:row[yKey]}));
+ const sources=valid.map(row=>({...row}));
  const siteYears=[...new Set(valid.map(row=>`${row.Site} ${row.Year}`))].join('; ');
  const exportTitle=`${yLabel} by ${xLabel}`;
  const inner=svg.slice(svg.indexOf('>')+1,svg.lastIndexOf('</svg>'));
  const legendSVG=treatments.map((label,index)=>`<rect x="${left+index*100}" y="${h+75}" width="9" height="9" fill="${palette[label]||'#6d001f'}"/><text x="${left+14+index*100}" y="${h+83}">${esc(label)}</text>`).join('');
- const figure=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h+136}" width="${w}" height="${h+136}"><style>text{font:12px Arial,sans-serif;fill:#514742}.axis-unit{font-weight:bold}</style><rect width="100%" height="100%" fill="white"/><text x="${left}" y="21" style="font-size:16px;font-weight:bold">${esc(exportTitle)}</text><text x="${left}" y="42">${esc(siteYears)} · ${valid.length} plot-year rows · ${omitted} missing pairs excluded</text><g transform="translate(0 60)">${inner}</g>${xKey==='Plot'||!categorical?legendSVG:''}<text x="${left}" y="${h+118}">Categorical groups show means; numeric axes show individual plot-years. Descriptive comparison.</text></svg>`;
+ const figureNotes=xKey==='Plot'?['Individual plot-year bars (n = 1); SD unavailable.','Each bar preserves one selected plot-year observation.']:categorical?['Bars: mean ± 1 sample SD (n − 1); SD unavailable for n < 2.','n counts selected plot-year rows; SD describes variation across those rows.']:['Each point is one selected plot-year; color denotes irrigation treatment.','Descriptive comparison. Source CSV retains original plot-year rows.'];
+ const figure=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h+158}" width="${w}" height="${h+158}"><style>text{font:12px Arial,sans-serif;fill:#514742}.axis-unit{font-weight:bold}</style><rect width="100%" height="100%" fill="white"/><text x="${left}" y="21" style="font-size:16px;font-weight:bold">${esc(exportTitle)}</text><text x="${left}" y="42">${esc(siteYears)} · ${valid.length} plot-year rows · ${omitted} missing pairs excluded</text><g transform="translate(0 60)">${inner}</g>${xKey==='Plot'||!categorical?legendSVG:''}<text x="${left}" y="${h+118}">${esc(figureNotes[0])}</text><text x="${left}" y="${h+140}">${esc(figureNotes[1])}</text></svg>`;
  state.xyExport={figure,sources};
 }
 $('chartX').onchange=()=>state.results&&drawXYChart(filteredRows());
@@ -166,7 +183,7 @@ function renderTreatmentMatrix(rows,metric,target=treatmentMatrix,asSiteOverview
  const cells=new Map();
  for(const i of irrigation)for(const n of nitrogen){
   const values=rows.filter(row=>String(row.Irrigation_treatment)===i&&String(row.Nitrogen_treatment)===n).map(row=>row[metric]).filter(finiteValue);
-  cells.set(JSON.stringify([i,n]),{mean:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,n:values.length});
+  cells.set(JSON.stringify([i,n]),sampleSummary(values));
  }
  const available=[...cells.values()].map(cell=>cell.mean).filter(finiteValue);
  const low=Math.min(...available),high=Math.max(...available);
@@ -174,7 +191,7 @@ function renderTreatmentMatrix(rows,metric,target=treatmentMatrix,asSiteOverview
  const header=nitrogen.map(n=>`<th scope="col">${esc(n)}</th>`).join('');
  const body=irrigation.map(i=>`<tr><th scope="row">${esc(i)}</th>${nitrogen.map(n=>{
   const cell=cells.get(JSON.stringify([i,n]));
-  return `<td class="matrix-cell" ${cell.n?`style="background:${color(cell.mean)}"`:''} title="${esc(i)} × ${esc(n)} · ${cell.n?`${number(cell.mean,2)} · n=${cell.n}`:'No observations'}">${cell.n?`<strong>${number(cell.mean,1)}</strong><small>n = ${cell.n}</small>`:'<span>—</span>'}</td>`;
+  return `<td class="matrix-cell" ${cell.n?`style="background:${color(cell.mean)}"`:''} title="${esc(i)} × ${esc(n)} · ${cell.n?`mean ${number(cell.mean,2)} · n=${cell.n} · ${cell.sd===null?'SD unavailable (n < 2)':`sample SD ${number(cell.sd,2)}`}`:'No observations'}">${cell.n?`<strong>${number(cell.mean,1)}</strong><small>n = ${cell.n}</small>`:'<span>—</span>'}</td>`;
  }).join('')}</tr>`).join('');
  const label=asSiteOverview?'Modeled ET · mm':$('comparisonMetric').selectedOptions[0].text;
  target.innerHTML=`<div class="matrix-heading"><div><strong>${asSiteOverview?'Site-year ET across all plots':'Treatment pattern'} · ${esc(siteYears[0])}</strong><span>${esc(label)} · mean across plots; descriptive only</span></div><span>Rows: irrigation · columns: nitrogen</span></div><div class="matrix-scroll"><table><thead><tr><th scope="col">Irrigation</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="matrix-footnote">Cell shading is relative to this selected site/year and metric. Missing values stay blank; n counts plots with a value.</div>`;

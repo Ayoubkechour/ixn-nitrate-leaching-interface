@@ -88,6 +88,12 @@ individual plot-year points, with incomplete pairs excluded.
 The treatment matrix summarizes all plots in the selected site-year, with the
 mean and observation count in each irrigation × nitrogen cell. It defaults to
 modeled ET and can show the other metrics in the selector.
+Bars that summarize multiple plot totals show mean ±1 sample standard deviation
+(SD, using n−1 for the variance), with the number of contributing plot-years.
+These whiskers describe variation among the selected plots; they are not
+confidence intervals or model uncertainty. SD is unavailable for n < 2.
+Single-plot monthly totals and individual daily values retain their values
+without fabricated replicate error bars.
 The ET panel offers monthly totals and cumulative curves for modeled actual ET
 and weather-derived reference ET, inspired by OpenET's
 [Data Explorer](https://etdata.org/openet-data-explorer/). These IXN quantities

@@ -16,7 +16,7 @@ let etRows=[];
 let etView='monthly';
 const etCard=document.createElement('div');
 etCard.className='card';
-etCard.innerHTML='<div class="card-title"><div><h2>Evapotranspiration through the season</h2><p>IXN modeled actual ET and weather-derived reference ET. Monthly totals include only analyzed days.</p></div><div class="depth-controls"><button type="button" data-et-view="monthly" class="selected">Monthly</button><button type="button" data-et-view="cumulative">Cumulative</button></div></div><div id="etTotals" class="water-totals"></div><div class="chart-legend"><span><i style="background:#3a7863"></i>Modeled actual ET</span><span><i style="background:#8aa6a0"></i>Reference ET</span></div><div id="etChart" class="chart"></div><p class="result-footnote">These are IXN estimates from supplied weather and model settings, not OpenET satellite ET.</p>';
+etCard.innerHTML='<div class="card-title"><div><h2>Evapotranspiration through the season</h2><p>IXN modeled actual ET and weather-derived reference ET. Monthly totals include only analyzed days.</p></div><div class="depth-controls"><button type="button" data-et-view="monthly" class="selected">Monthly</button><button type="button" data-et-view="cumulative">Cumulative</button></div></div><div id="etTotals" class="water-totals"></div><div class="chart-legend"><span><i style="background:#3a7863"></i>Modeled actual ET</span><span><i style="background:#8aa6a0"></i>Reference ET</span></div><div id="etChart" class="chart"></div><p class="result-footnote">One plot is shown (n = 1 per monthly total); replicate SD is not estimable here. Overview and grouped comparisons show mean ±1 SD across selected plots. These are IXN estimates from supplied weather and model settings, not OpenET satellite ET.</p>';
 document.querySelector('#results-daily > .card').insertAdjacentElement('afterend',etCard);
 etCard.querySelectorAll('[data-et-view]').forEach(button=>button.onclick=()=>{
  etView=button.dataset.etView;
@@ -165,7 +165,7 @@ function drawMonthlyET(){
  const max=Math.max(1,...values.flatMap(row=>[row.actual,row.reference]));
  const x=index=>left+(index+.5)*(width-left-right)/values.length;
  const y=value=>bottom-value/max*(bottom-top);
- let svg=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Monthly modeled actual and reference evapotranspiration totals in millimeters"><title>Monthly ET totals over analyzed days</title><text x="${left}" y="13" class="axis-unit">mm/month</text>`;
+ let svg=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Monthly modeled actual and reference evapotranspiration totals in millimeters"><title>Monthly ET totals over analyzed days</title><desc>One plot-month per bar, n = 1. Replicate standard deviation is not estimable.</desc><text x="${left}" y="13" class="axis-unit">mm/month</text>`;
  for(let tick=0;tick<=4;tick++){
   const value=max*tick/4,cy=y(value);
   svg+=`<line x1="${left}" y1="${cy}" x2="${width-right}" y2="${cy}" stroke="#e5ece5"/><text x="${left-9}" y="${cy+4}" text-anchor="end">${number(value,0)}</text>`;
@@ -174,7 +174,7 @@ function drawMonthlyET(){
  values.forEach((row,index)=>{
   const cx=x(index);
   for(const [value,shift,color,label] of [[row.actual,-barWidth-2,'#3a7863','Modeled actual ET'],[row.reference,2,'#8aa6a0','Reference ET']]){
-   svg+=`<rect x="${cx+shift}" y="${y(value)}" width="${barWidth}" height="${bottom-y(value)}" rx="2" fill="${color}"><title>${esc(row.month)} · ${label}: ${number(value,1)} mm</title></rect>`;
+   svg+=`<rect x="${cx+shift}" y="${y(value)}" width="${barWidth}" height="${bottom-y(value)}" rx="2" fill="${color}"><title>${esc(row.month)} · ${label}: ${number(value,1)} mm · n = 1 plot-month · SD not estimable</title></rect>`;
   }
   const month=new Date(`${row.month}-01T00:00:00Z`).toLocaleString('en-US',{month:'short',timeZone:'UTC'});
   svg+=`<text x="${cx}" y="${height-19}" text-anchor="middle">${month}</text>`;
