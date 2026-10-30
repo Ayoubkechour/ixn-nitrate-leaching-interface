@@ -11,7 +11,7 @@ import pandas as pd
 
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE/'dist'/'python'))
-from interface_engine import analyze, prepared_tables, parameters_from_form
+from interface_engine import analyze, prepared_tables, parameters_from_form, PR2_COLUMNS, PR2_WEIGHTS_MM, read_table
 from leaching_model import Parameters
 from leaching_sources import Sources
 
@@ -68,6 +68,39 @@ class InputTests(unittest.TestCase):
         tables=prepared_tables(dict(workbook=str(HERE/'dist/templates/input_template.xlsx'),nitrate=str(override)))
         self.assertEqual(tables['nitrate'].Nitrate_mg_L.iloc[0],42)
 
+    def test_pr2_depths_are_preserved_and_integrated_only_when_complete(self):
+        def edit(table):
+            table.loc[0, PR2_COLUMNS[-1]] = None
+            return table
+        self.modified('moisture', edit)
+        table=prepared_tables(self.config['files'])['moisture']
+        self.assertTrue(set(PR2_COLUMNS) <= set(table.columns))
+        self.assertFalse(bool(table.loc[0,'Complete_profile']))
+        self.assertTrue(pd.isna(table.loc[0,'Observed_storage_mm']))
+        expected=(table.loc[1,PR2_COLUMNS].to_numpy(dtype=float)/100*PR2_WEIGHTS_MM).sum()
+        self.assertAlmostEqual(table.loc[1,'Observed_storage_mm'], expected)
+        self.assertAlmostEqual(table.loc[1,'Profile_depth_m'], .9144)
+
+    def test_pr2_spreadsheet_westport_sheet_is_accepted(self):
+        path=self.root/'pr2.xlsx'
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame({'Other':[1]}).to_excel(writer,sheet_name='Notes',index=False)
+            pd.read_csv(self.config['files']['moisture']).to_excel(writer,sheet_name='Westport',index=False)
+        self.assertEqual(read_table(path,'moisture').columns.tolist()[:2],['Date','Plot'])
+        self.config['files']['moisture']=str(path)
+        self.assertEqual(len(prepared_tables(self.config['files'])['moisture']),18)
+
+    def test_pr2_profile_depth_is_reflected_in_results(self):
+        with patch('interface_engine.draw_plot_year_figures',return_value=pd.DataFrame()):
+            result,_=analyze(self.config,self.root,lambda message:None)
+        self.assertTrue(all(abs(row['Model_profile_depth_m']-.9144)<1e-9 for row in result['plot_year']))
+        self.assertIn('6in_VWC %',result['daily'][0])
+
+    def test_pr2_rejects_unmatched_custom_profile(self):
+        self.config['parameters']={'soil_bottom_m':[.3,.6,.9,1.1]}
+        with self.assertRaisesRegex(ValueError,'0.9144 m'):
+            analyze(self.config,self.root,lambda message:None)
+
     def test_invalid_parameter_lengths_and_nan(self):
         for settings in [{'soil_bottom_m':[.3,.6]}, {'kcb_mid':float('nan')}, {'cn':[80,60,90]}, {'stage_days':[30.5,50,50,37]}, {'tew_mm':8,'rew_mm':10}]:
             with self.subTest(settings=settings):
@@ -81,6 +114,12 @@ class InputTests(unittest.TestCase):
             self.assertIsNone(row['Load_kg_ha'])
             self.assertIsNone(row['WB_ETa_measured_mm'])
             self.assertAlmostEqual(row['WB_ETa_mm'],row['Model_ETa_mm'])
+        self.assertEqual(len(result['daily_plots']),len(result['plot_year']))
+        self.assertEqual(result['daily_id'],result['daily_plots'][0]['id'])
+        for item in result['daily_plots']:
+            records=json.loads((self.root/'daily_previews'/(item['id']+'.json')).read_text())
+            self.assertEqual(len(records),108)
+            self.assertTrue(all(row['Nitrate_mg_L'] is None for row in records))
 
     def test_microgram_conversion_and_flagged_blank_irrigation(self):
         def edit(d):d.loc[0,'Irrigation_mm']=None;return d

@@ -6,7 +6,7 @@ const schema = {
  weather:{title:'Weather',required:true,description:'Daily temperatures, humidity, wind, solar radiation and rainfall.',columns:'Date, Tmax_C, Tmin_C, Wind_m_s, Rs_MJ_m2_day, Rain_mm, Tdew_C (or RHmin_pct + RHmax_pct)'},
  irrigation:{title:'Irrigation',required:true,description:'A complete event log, with plot IDs and amounts in millimeters.',columns:'Date, Plot, Irrigation_mm'},
  nitrate:{title:'Solution nitrate',description:'Measured concentrations and sampling dates for each plot.',columns:'Date, Plot, Nitrate_mg_L'},
- moisture:{title:'Soil moisture',description:'End-of-day total profile water storage, in millimeters.',columns:'Date, Plot, Observed_storage_mm'},
+ moisture:{title:'Soil moisture',description:'Upload raw PR2 VWC readings at five depths, or complete profile storage in mm.',columns:'Date, Plot, 6in_VWC %, 12in_VWC %, 18in_VWC %, 24_inVWC %, 36in_VWC % (or Observed_storage_mm)'},
  plots:{title:'Plot & treatment map',description:'Optional treatment labels and replicates for each field plot.',columns:'Plot, Irrigation_treatment, Nitrogen_treatment, Rep'},
  workbook:{title:'One workbook, all inputs',description:'Named sheets: Weather, Irrigation, Nitrate, Moisture, Plots.'},
  collection_calendar:{title:'Collection calendar',description:'Verified sampling dates: Site, Year, Week, Collection_date.',accept:'.csv'},
@@ -140,7 +140,7 @@ function done(data,binaries){
  $('checksList').innerHTML=data.checks.map(c=>`<div class="quality-item"><span class="pass-check">${c.Passed?'✓':'×'}</span><div>${esc(c.Check)}<p>${esc(c.Details)}</p></div></div>`).join('');
  $('issuesList').innerHTML=data.issues.length?data.issues.map(i=>`<div class="quality-item"><div><span class="quality-scope">${esc(i.scope||'Review')}</span>${esc(i.message)}</div></div>`).join(''):'<p>No additional data-quality notes were recorded.</p>';
  $('dailyTitle').textContent=`Daily water budget · plot ${data.daily_plot}`;
- drawDaily(data.daily);renderResults();setResultTab('plots');showView('results');
+ resetExplorer(data);renderResults();setResultTab('plots');showView('results');
 }
 function failure(error){setBusy(false);$('errorPanel').classList.remove('hidden');$('errorPanel').textContent=error;showView('review');}
 async function fileBytes(file){return new Uint8Array(await file.arrayBuffer());}
@@ -157,7 +157,7 @@ $('runButton').onclick=async()=>{
  try{
   const uploads=await collectUploads();
   if(state.local){await runLocal(config,uploads);return;}
-  if(!state.worker){state.worker=new Worker('worker.js',{type:'module'});state.worker.onmessage=e=>{const m=e.data;if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};state.worker.onerror=e=>{failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);state.worker.terminate();state.worker=null;};}
+  if(!state.worker){state.worker=new Worker('worker.js',{type:'module'});state.worker.onmessage=e=>{const m=e.data;if(m.type==='daily'||m.type==='daily_error'){receiveDaily(m);return;}if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};state.worker.onerror=e=>{failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);state.worker.terminate();state.worker=null;};}
   state.worker.postMessage({type:'run',config,uploads},uploads.map(f=>f.bytes.buffer));
  }catch(e){failure(e.message);}
 };
@@ -167,38 +167,43 @@ async function runLocal(config,uploads){
  const response=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config,uploads:uploads.map(f=>({role:f.role,name:f.name,data:toBase64(f.bytes)}))})});
  const body=await response.json();if(!response.ok)throw Error(body.error||'Cannot start the analysis.');state.job=body.id;
  let seen=0;
- async function poll(){try{const response=await fetch(`/api/jobs/${body.id}`);const job=await response.json();if(!response.ok)throw Error(job.error||'Cannot read analysis status.');for(const message of (job.progress||[]).slice(seen))logProgress(message);seen=(job.progress||[]).length;if(job.status==='done'){state.job=null;done(job.result);for(const [key,name] of [['zip','ixn_results.zip'],['xlsx','results/results.xlsx'],['pdf','results/plot_year_results.pdf']])state.downloads[key]=`/api/jobs/${body.id}/files/${name}`;}else if(job.status==='error'){failure(job.error||'Analysis failed.');state.job=null;}else if(state.busy)state.poll=setTimeout(poll,800);}catch(e){failure(e.message);}}
+ async function poll(){try{const response=await fetch(`/api/jobs/${body.id}`);const job=await response.json();if(!response.ok)throw Error(job.error||'Cannot read analysis status.');for(const message of (job.progress||[]).slice(seen))logProgress(message);seen=(job.progress||[]).length;if(job.status==='done'){state.job=null;state.completedJob=body.id;done(job.result);for(const [key,name] of [['zip','ixn_results.zip'],['xlsx','results/results.xlsx'],['pdf','results/plot_year_results.pdf']])state.downloads[key]=`/api/jobs/${body.id}/files/${name}`;}else if(job.status==='error'){failure(job.error||'Analysis failed.');state.job=null;}else if(state.busy)state.poll=setTimeout(poll,800);}catch(e){failure(e.message);}}
  await poll();
 }
-function filteredRows(){const key=$('resultFilter').value;return state.results.plot_year.filter(r=>key==='all'||`${r.Dataset} / ${r.Site} / ${r.Year}`===key);}
+function filteredRows(){const key=$('resultFilter').value;return state.results.plot_year.filter(r=>(key==='all'||`${r.Dataset} / ${r.Site} / ${r.Year}`===key)&&($('irrigationFilter').value==='all'||String(r.Irrigation_treatment)===$('irrigationFilter').value)&&($('nitrogenFilter').value==='all'||String(r.Nitrogen_treatment)===$('nitrogenFilter').value));}
 const number=(n,d=2)=>n===null||n===undefined||!Number.isFinite(Number(n))?'—':Number(n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
 function renderResults(){
  if(!state.results)return;const rows=filteredRows();
  const mean=key=>{const v=rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
  $('metricCards').innerHTML=[['Reported-analyte load','Load_kg_ha','kg/ha','Mean per plot · sampled intervals','accent'],['WB_ETa + fallback','WB_ETa_mm','mm',`${rows.filter(r=>r.WB_days>0).length}/${rows.length} plots with measured WB coverage`,''],['Modeled drainage','Drainage_mm','mm','Mean per plot · full model period',''],['Modeled ET','Model_ETa_mm','mm','Mean per plot · full model period','']].map(([label,key,unit,note,cls])=>`<div class="metric-card ${cls}"><div class="metric-label">${label}</div><div class="metric-value">${number(mean(key),key==='Load_kg_ha'?2:1)}<small>${unit}</small></div><p>${note}</p></div>`).join('');
  drawBars(rows,$('chartMetric').value);
- const columns=[['Plot','Plot'],['Site','Site'],['Year','Year'],['Irrigation_treatment','Irrigation'],['Nitrogen_treatment','Nitrogen'],['Load_kg_ha','Load (kg/ha)'],['WB_ETa_mm','WB_ETa (mm)'],['Model_ETa_mm','ET (mm)'],['Drainage_mm','Drainage (mm)'],['WB_days','Measured WB days']];
- $('resultsTable').innerHTML=`<thead><tr>${columns.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(([key])=>`<td>${['Plot','Site','Year','Irrigation_treatment','Nitrogen_treatment','WB_days'].includes(key)?esc(r[key]):number(r[key])}</td>`).join('')}</tr>`).join('')}</tbody>`;
- const csvColumns=Object.keys(rows[0]||{});const quote=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[csvColumns.map(quote).join(','),...rows.map(r=>csvColumns.map(k=>quote(r[k])).join(','))].join('\r\n');addDownload('csv','\uFEFF'+csv,'text/csv;charset=utf-8');
+ const columns=[['Plot','Plot'],['Site','Site'],['Year','Year'],['Irrigation_treatment','Irrigation'],['Nitrogen_treatment','Nitrogen'],['Load_kg_ha','Load (kg/ha)'],['WB_ETa_mm','WB_ETa (mm)'],['Model_ETa_mm','ET (mm)'],['Drainage_mm','Drainage (mm)'],['WB_days','Measured WB days'],['Leaching_days','Nitrate coverage days'],['Result_status','Result status']];
+ $('resultsTable').innerHTML=`<thead><tr>${columns.map(c=>`<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(([key])=>`<td>${['Plot','Site','Year','Irrigation_treatment','Nitrogen_treatment','WB_days','Leaching_days','Result_status'].includes(key)?esc(r[key]):number(r[key])}</td>`).join('')}</tr>`).join('')}</tbody>`;
+ const csvColumns=Object.keys(rows[0]||{});const quote=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[csvColumns.map(quote).join(','),...rows.map(r=>csvColumns.map(k=>quote(r[k])).join(','))].join('\r\n');addDownload('csv','\uFEFF'+csv,'text/csv;charset=utf-8');renderExplorer(rows);
 }
 function drawBars(rows,key){
  const valid=rows.filter(r=>r[key]!==null&&Number.isFinite(r[key]));if(!valid.length){$('plotChart').innerHTML='<div class="chart-empty">No observations available for this metric. Missing values are not treated as zero.</div>';return;}
  const width=Math.max(760,rows.length*12),height=275,left=55,bottom=height-42,top=18,max=Math.max(...valid.map(r=>r[key]),0)||1,min=Math.min(0,...valid.map(r=>r[key])),range=max-min||1,span=bottom-top;
- const y=v=>bottom-(v-min)/range*span;let svg=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc($('chartMetric').selectedOptions[0].text)} by plot"><title>${esc($('chartMetric').selectedOptions[0].text)}</title>`;
+ const y=v=>bottom-(v-min)/range*span;const selectedLabel=$('chartMetric').selectedOptions[0].text;const unit=selectedLabel.includes('kg/ha')?'kg/ha':'mm';let svg=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(selectedLabel)} by plot"><title>${esc(selectedLabel)} by plot</title><text x="${left}" y="12" class="axis-unit">${unit}</text>`;
  for(let t=0;t<=4;t++){const value=min+range*t/4;svg+=`<line x1="${left}" y1="${y(value)}" x2="${width-15}" y2="${y(value)}" stroke="#e9eee3"/><text x="${left-10}" y="${y(value)+3}" text-anchor="end">${number(value,1)}</text>`;}
- const bw=(width-left-25)/rows.length;rows.forEach((r,i)=>{if(r[key]===null)return;const x=left+i*bw+2,v=r[key],color={I1:'#3d7158',I2:'#b49861',I3:'#8c8b9e',I4:'#77915b'}[r.Irrigation_treatment]||'#527b60';svg+=`<rect x="${x}" y="${Math.min(y(v),y(0))}" width="${Math.max(2,bw-4)}" height="${Math.max(1,Math.abs(y(v)-y(0)))}" rx="2" fill="${color}" opacity=".86"><title>Plot ${esc(r.Plot)} · ${esc(r.Site)} ${r.Year}: ${number(v,3)}</title></rect>`;if(i%Math.max(1,Math.ceil(rows.length/14))===0)svg+=`<text x="${x+bw/2}" y="${height-20}" text-anchor="middle">${esc(r.Plot)}</text>`;});
- svg+=`<text x="${(width+left)/2}" y="${height-2}" text-anchor="middle">Plot ID</text></svg>`;$('plotChart').innerHTML=svg;
+ svg+=`<line x1="${left}" y1="${y(0)}" x2="${width-15}" y2="${y(0)}" stroke="#9dad9c"/>`;
+ const palette={I1:'#3d7158',I2:'#b49861',I3:'#8c8b9e',I4:'#77915b'};
+ const bw=(width-left-25)/rows.length;rows.forEach((r,i)=>{if(r[key]===null)return;const x=left+i*bw+2,v=r[key],color=palette[r.Irrigation_treatment]||'#527b60';svg+=`<rect x="${x}" y="${Math.min(y(v),y(0))}" width="${Math.max(2,bw-4)}" height="${Math.max(1,Math.abs(y(v)-y(0)))}" rx="2" fill="${color}" opacity=".86"><title>Plot ${esc(r.Plot)} · ${esc(r.Site)} ${r.Year}: ${number(v,3)} ${unit}</title></rect>`;if(i%Math.max(1,Math.ceil(rows.length/14))===0)svg+=`<text x="${x+bw/2}" y="${height-20}" text-anchor="middle">${esc(r.Plot)}</text>`;});
+ svg+=`<text x="${(width+left)/2}" y="${height-2}" text-anchor="middle">Plot ID</text></svg>`;
+ const treatments=[...new Set(rows.map(row=>String(row.Irrigation_treatment)))].sort();
+ const legend=treatments.map(label=>`<span><i style="background:${palette[label]||'#527b60'}"></i>${esc(label)}</span>`).join('');
+ $('plotChart').innerHTML=`<div class="chart-key"><span>Irrigation treatment</span>${legend}</div>${svg}`;
 }
 function drawDaily(rows){
  if(!rows.length)return;const w=880,h=280,left=48,top=18,bottom=245,max=Math.max(1,...rows.flatMap(r=>[r.Rain_mm+r.Irrigation_mm,r.ETa_model_mm,r.Drainage_mm])),x=i=>left+i*(w-left-15)/Math.max(1,rows.length-1),y=v=>bottom-v/max*(bottom-top);
- let svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Daily rainfall, irrigation, modeled ET and drainage"><title>Daily water budget</title>`;
+ let svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Daily rainfall, irrigation, modeled ET and drainage in millimeters per day"><title>Daily water fluxes · mm/day</title><text x="${left}" y="12" class="axis-unit">mm/day</text>`;
  for(let i=0;i<5;i++){const v=max*i/4;svg+=`<line x1="${left}" y1="${y(v)}" x2="${w-15}" y2="${y(v)}" stroke="#ebefe5"/><text x="${left-9}" y="${y(v)+3}" text-anchor="end">${number(v,1)}</text>`;}
  const barw=Math.max(1,(w-left-15)/rows.length*.7);for(let i=0;i<rows.length;i++){const r=rows[i];svg+=`<rect x="${x(i)-barw/2}" y="${y(r.Rain_mm+r.Irrigation_mm)}" width="${barw}" height="${bottom-y(r.Rain_mm+r.Irrigation_mm)}" fill="#91b3c3" opacity=".8"><title>${esc(r.Date.slice(0,10))}: water inputs ${number(r.Rain_mm+r.Irrigation_mm)} mm</title></rect>`;}
  for(const [key,color] of [['ETa_model_mm','#3a7863'],['Drainage_mm','#c49343']])svg+=`<polyline fill="none" stroke="${color}" stroke-width="2" points="${rows.map((r,i)=>`${x(i)},${y(r[key])}`).join(' ')}"/>`;
  for(let i=0;i<rows.length;i+=Math.max(1,Math.ceil(rows.length/7)))svg+=`<text x="${x(i)}" y="${h-11}" text-anchor="middle">${esc(rows[i].Date.slice(5,10))}</text>`;
  svg+='</svg>';$('dailyChart').innerHTML=svg;
 }
-function setResultTab(tab){state.resultTab=tab;document.querySelectorAll('[data-result-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.resultTab===tab));for(const name of ['plots','daily','quality'])$(`results-${name}`).classList.toggle('hidden',tab!==name);}
+function setResultTab(tab){state.resultTab=tab;document.querySelectorAll('[data-result-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.resultTab===tab));for(const name of ['plots','comparison','daily','quality'])$(`results-${name}`).classList.toggle('hidden',tab!==name);}
 document.querySelectorAll('[data-result-tab]').forEach(b=>b.onclick=()=>setResultTab(b.dataset.resultTab));
 $('resultFilter').onchange=renderResults;$('chartMetric').onchange=()=>state.results&&drawBars(filteredRows(),$('chartMetric').value);
 $('downloadAll').onclick=()=>download('zip','ixn_results.zip');$('downloadExcel').onclick=()=>download('xlsx','ixn_results.xlsx');$('downloadPdf').onclick=()=>download('pdf','ixn_plot_year_report.pdf');$('downloadCsv').onclick=()=>download('csv','ixn_plot_year_results.csv');

@@ -39,6 +39,21 @@ class Parameters:
     soil_wp: tuple = (0.065, 0.057, 0.036, 0.009)
 
     def validate(self):
+        sequences = {'stage_days', 'mad', 'cn', 'antecedent_threshold_mm',
+                     'soil_bottom_m', 'soil_fc', 'soil_wp'}
+        for name, value in asdict(self).items():
+            if name == 'assimilate_observations':
+                if not isinstance(value, (bool, np.bool_)):
+                    raise ValueError('assimilate_observations must be true or false.')
+                continue
+            try:
+                array = np.asarray(value)
+                valid = (array.ndim == (1 if name in sequences else 0)
+                         and array.size > 0 and np.isfinite(array).all())
+            except (TypeError, ValueError):
+                valid = False
+            if not valid:
+                raise ValueError(name + ' must contain finite numbers in the expected shape.')
         b, fc, wp = map(np.asarray, (self.soil_bottom_m, self.soil_fc, self.soil_wp))
         if not (len(b) == len(fc) == len(wp) and np.all(np.diff(np.r_[0, b]) > 0)):
             raise ValueError('Soil layer boundaries must increase, with one FC/WP per layer.')
@@ -52,10 +67,22 @@ class Parameters:
             raise ValueError('Initial surface depletion must lie in [0, TEW].')
         if len(self.stage_days) != 4 or min(self.stage_days) <= 0 or len(self.mad) != 4 or not all(0 < v < 1 for v in self.mad):
             raise ValueError('Four positive stage durations and four MAD fractions required.')
+        if any(v != int(v) for v in self.stage_days):
+            raise ValueError('Crop stage lengths must be whole days.')
+        if self.stage_days[1] < 2 or self.stage_days[3] < 2:
+            raise ValueError('Development and late stages require at least two days for the workbook interpolation.')
+        if self.kcb_initial <= 0 or self.kcb_mid <= 0 or self.kcb_end < 0:
+            raise ValueError('Initial and mid-season Kcb must be positive; end Kcb cannot be negative.')
+        if self.height_max_m <= 0 or self.climate_adjustment_height_m <= 0 or self.kcmax_wind_factor < 0:
+            raise ValueError('Crop heights must be positive; wind factor cannot be negative.')
         if not (0 < self.root_min_m <= self.root_max_m and 0 <= self.albedo < 1):
             raise ValueError('Invalid root limits or albedo.')
         if not all(0 < v <= 100 for v in self.cn):
             raise ValueError('Curve numbers must lie in (0,100].')
+        if len(self.cn) != 3 or list(self.cn) != sorted(self.cn):
+            raise ValueError('Supply three increasing curve numbers for dry/normal/wet conditions.')
+        if len(self.antecedent_threshold_mm) != 2 or not 0 <= self.antecedent_threshold_mm[0] < self.antecedent_threshold_mm[1]:
+            raise ValueError('Supply two increasing, nonnegative antecedent thresholds.')
 
     def capacity(self, depth_m, available=False):
         bottom = np.asarray(self.soil_bottom_m)
@@ -166,6 +193,8 @@ def crop_coefficients(d, planting_date, p):
         climate = d.loc[mid] if mid.any() else d
     adjustment = (0.04*(climate.U2_m_s.mean()-2)-0.004*(climate.RHmin_pct.mean()-45))*(p.climate_adjustment_height_m/3)**0.3
     kmid = p.kcb_mid + adjustment
+    if not np.isfinite(kmid) or kmid <= p.kcb_initial:
+        raise ValueError('Climate-adjusted mid-season Kcb must exceed initial Kcb for the workbook growth equations. Review crop settings and weather.')
     k = np.full(len(d), p.kcb_initial)
     dev = stage == 1
     k[dev] = p.kcb_initial+(kmid-p.kcb_initial)*(dap[dev]-limits[0]-1)/(p.stage_days[1]-1)

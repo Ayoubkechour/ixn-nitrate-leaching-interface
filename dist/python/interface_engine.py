@@ -9,7 +9,7 @@ import json
 import math
 import platform
 import zipfile
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import matplotlib
@@ -29,9 +29,13 @@ SCHEMAS = {
     'weather': ['Date', 'Tmax_C', 'Tmin_C', 'Wind_m_s', 'Rs_MJ_m2_day', 'Rain_mm'],
     'irrigation': ['Date', 'Plot', 'Irrigation_mm'],
     'nitrate': ['Date', 'Plot', 'Nitrate_mg_L'],
-    'moisture': ['Date', 'Plot', 'Observed_storage_mm'],
+    'moisture': ['Date', 'Plot'],
     'plots': ['Plot', 'Irrigation_treatment', 'Nitrogen_treatment', 'Rep'],
 }
+PR2_COLUMNS = ['6in_VWC %', '12in_VWC %', '18in_VWC %', '24_inVWC %', '36in_VWC %']
+PR2_DEPTH_M = 0.9144
+PR2_CENTERS_M = np.array([6, 12, 18, 24, 36]) * 0.0254
+PR2_WEIGHTS_MM = np.diff(np.r_[0, (PR2_CENTERS_M[:-1] + PR2_CENTERS_M[1:]) / 2, PR2_CENTERS_M[-1]]) * 1000
 
 
 def parameters_from_form(values):
@@ -76,7 +80,12 @@ def read_table(path, role):
     if path.suffix.lower() == '.csv':
         table = pd.read_csv(path)
     elif path.suffix.lower() == '.xlsx':
-        table = pd.read_excel(path)
+        if role == 'moisture':
+            with pd.ExcelFile(path) as book:
+                sheet = 'Westport' if 'Westport' in book.sheet_names else 0
+                table = pd.read_excel(book, sheet_name=sheet)
+        else:
+            table = pd.read_excel(path)
     else:
         raise ValueError(role + ': use a CSV or XLSX file.')
     table.columns = table.columns.astype(str).str.strip()
@@ -102,6 +111,21 @@ def validate_table(table, role):
     if table.duplicated(keys).any():
         duplicate = table.loc[table.duplicated(keys, keep=False), keys].iloc[0].to_dict()
         raise ValueError(role.capitalize() + ': duplicate records for ' + str(duplicate) + '. Resolve replicates before upload.')
+    if role == 'moisture':
+        raw = set(PR2_COLUMNS) <= set(table.columns)
+        if raw and 'Observed_storage_mm' in table:
+            raise ValueError('Moisture: supply either the five raw PR2 VWC columns or Observed_storage_mm, not both.')
+        if raw:
+            numeric_checked(table, PR2_COLUMNS, allow_missing=True)
+            values = table[PR2_COLUMNS]
+            if ((values < 0) | (values > 100)).any().any():
+                raise ValueError('Moisture: PR2 VWC readings must be percentages from 0 to 100.')
+            table['Complete_profile'] = values.notna().all(axis=1)
+            table['Observed_storage_mm'] = values.div(100).mul(PR2_WEIGHTS_MM, axis=1).sum(axis=1, min_count=len(PR2_COLUMNS))
+            table['Profile_depth_m'] = PR2_DEPTH_M
+        elif 'Observed_storage_mm' not in table:
+            missing_depths = [name for name in PR2_COLUMNS if name not in table]
+            raise ValueError('Moisture: supply Observed_storage_mm or all five PR2 columns. Missing: ' + ', '.join(missing_depths))
     return table
 
 
@@ -177,6 +201,16 @@ def analyze(request, workspace, progress=print):
     elif mode == 'tables':
         progress('Checking uploaded tables and calculation settings…')
         tables = prepared_tables(files)
+        pr2_input = 'moisture' in tables and set(PR2_COLUMNS) <= set(tables['moisture'].columns)
+        if pr2_input:
+            if tuple(p.soil_bottom_m) == (0.30, 0.60, 0.90, 1.20):
+                p = replace(p, soil_bottom_m=(0.30, 0.60, 0.90, PR2_DEPTH_M))
+                note('Raw PR2 VWC percentages integrated over 0–0.9144 m using midpoint cells. The default model profile was set to 0.9144 m to match the deepest sensor; no values were extrapolated to 1.2 m.', 'water balance')
+            elif not math.isclose(p.soil_bottom_m[-1], PR2_DEPTH_M, abs_tol=1e-6):
+                raise ValueError('Raw PR2 readings cover 0–0.9144 m. Set the final soil layer bottom to 0.9144 m, or upload a complete Observed_storage_mm profile at your configured depth.')
+            incomplete = int((~tables['moisture'].Complete_profile).sum())
+            if incomplete:
+                note(f'{incomplete} PR2 rows have missing depths; they remain in the input audit but are excluded from measured storage and water-balance intervals.', 'water balance')
         if not request.get('irrigation_complete'):
             raise ValueError('Confirm that the irrigation table is a complete event log. Unlisted days are treated as zero irrigation.')
         planting = pd.Timestamp(request.get('planting_date'))
@@ -265,7 +299,7 @@ def analyze(request, workspace, progress=print):
                 if outside.any():
                     note(f'{role}: {int(outside.sum())} observations fall outside the supplied weather/model period and are not used.')
         note('Soil and crop settings are user supplied; numerical checks do not establish field prediction accuracy.', 'parameters')
-        note('Moisture is end-of-day total profile storage in mm, at the configured soil depth. WB_ETa uses modeled fallback outside paired measured profiles.', 'water balance')
+        note('Moisture is end-of-day storage over the configured profile depth. WB_ETa uses modeled fallback outside paired complete profiles.', 'water balance')
         note('Load covers only paired, valid in-season nitrate samples; no seasonal extrapolation.', 'leaching')
         all_daily, all_wb, all_load, summaries = [], [], [], []
         comparison = []
@@ -276,7 +310,8 @@ def analyze(request, workspace, progress=print):
             d['Blank_irrigation_imputed'] = d.Blank_irrigation_imputed.fillna(False).astype(bool)
             for role, col in [('moisture', 'Observed_storage_mm'), ('nitrate', 'Nitrate_mg_L')]:
                 if role in tables:
-                    obs = tables[role].loc[tables[role].Plot == row.Plot, ['Date', col]]
+                    columns = ['Date', col] + (PR2_COLUMNS if role == 'moisture' and pr2_input else [])
+                    obs = tables[role].loc[tables[role].Plot == row.Plot, columns]
                     d = d.merge(obs, on='Date', how='left', validate='one_to_one')
                 else:
                     d[col] = np.nan
@@ -342,12 +377,21 @@ def analyze(request, workspace, progress=print):
     else:
         raise ValueError('Choose prepared tables or a raw IXN folder.')
     progress('Packaging outputs…')
-    # Keep the preview compact even when the run contains hundreds of plots.
+    # Load daily charts on demand rather than sending every plot to the browser.
+    preview_folder = workspace/'daily_previews'
+    preview_folder.mkdir(exist_ok=True)
+    daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L'] + PR2_COLUMNS
+    identities = ['Dataset', 'Site', 'Year', 'Plot']
+    daily_plots = []
+    for index, (identity, group) in enumerate(daily.groupby(identities, sort=True)):
+        records = json_records(group.sort_values('Date')[[c for c in daily_columns if c in group]])
+        (preview_folder/(str(index)+'.json')).write_text(json.dumps(records, allow_nan=False))
+        daily_plots.append(dict(id=str(index), **dict(zip(identities, identity))))
     first = plot_year.iloc[0]
-    selected = daily.loc[(daily.Dataset == first.Dataset) & (daily.Site == first.Site) & (daily.Year == first.Year) & (daily.Plot == first.Plot)]
-    daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L']
+    first_preview = next(item for item in daily_plots if all(item[key] == first[key] for key in identities))
     payload = dict(plot_year=json_records(plot_year), checks=json_records(checks), issues=json_records(quality),
-        daily=json_records(selected[[c for c in daily_columns if c in selected]]),
+        daily=json.loads((preview_folder/(first_preview['id']+'.json')).read_text()),
+        daily_plots=json_records(pd.DataFrame(daily_plots)), daily_id=first_preview['id'],
         daily_plot=int(first.Plot), daily_rows=len(daily),
         figures=[str(path.relative_to(output)) for path in sorted(output.rglob('*.png'))],
         status='provisional', plot_count=len(plot_year))

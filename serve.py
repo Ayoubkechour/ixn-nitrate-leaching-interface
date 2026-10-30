@@ -10,6 +10,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -65,7 +66,7 @@ class Handler(SimpleHTTPRequestHandler):
             folder, process = job['folder'], job['process']
             if len(parts)>=6 and parts[4]=='files':
                 filename = '/'.join(parts[5:])
-                if filename not in ['ixn_results.zip', 'results/results.xlsx', 'results/plot_year_results.pdf']:
+                if filename not in ['ixn_results.zip', 'results/results.xlsx', 'results/plot_year_results.pdf'] and not re.fullmatch(r'daily_previews/\d+\.json', filename):
                     return self.json_response(dict(error='File not found.'), 404)
                 source = folder/filename
                 if not source.is_file():

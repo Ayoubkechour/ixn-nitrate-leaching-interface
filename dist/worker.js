@@ -26,6 +26,15 @@ async function runtime(){
 }
 function safeName(name){const parts=name.replace(/\\/g,'/').split('/');if(parts.some(p=>p==='..'||p==='')||name.startsWith('/'))throw Error('Invalid input path.');return parts.join('/');}
 self.onmessage=async event=>{
+ if(event.data.type==='daily'){
+  try{
+   const id=String(event.data.id);if(!/^\d+$/.test(id))throw Error('Invalid plot selection.');
+   const py=await runtime();
+   const rows=JSON.parse(py.FS.readFile(`/run/daily_previews/${id}.json`,{encoding:'utf8'}));
+   self.postMessage({type:'daily',id,request:event.data.request,rows});
+  }catch(error){self.postMessage({type:'daily_error',request:event.data.request,message:String(error.message||error)});}
+  return;
+ }
  if(event.data.type!=='run')return;
  try{
   const py=await runtime();

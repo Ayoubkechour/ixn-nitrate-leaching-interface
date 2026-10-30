@@ -1,10 +1,10 @@
-# IXN analysis interface
+# IXN nitrate leaching interface
 
 A guided browser interface around the existing IXN Python engine: data uploads,
 study metadata, all soil/crop/hydrology parameters, review, execution, interactive
 results, and downloadable XLSX/CSV/PDF/PNG output bundles.
 
-The hosted version runs Python in a dedicated browser worker through Pyodide.
+The GitHub Pages version runs Python in a dedicated browser worker through Pyodide.
 Input files remain in tab memory. The first run downloads the pinned Python
 runtime and scientific packages from the same site; keep the tab open during calculation. Large
 multi-site studies are better suited to the native Python version below.
@@ -14,11 +14,16 @@ multi-site studies are better suited to the native Python version below.
 Use the same Python environment as `IxN_RUN_ALL.ipynb`:
 
 ```bash
-cd /users/4/kechc001/IXN_nitrate_leaching/interface
+cd ixn-nitrate-leaching-interface
 python serve.py --port 8765
 ```
 
-Open `http://127.0.0.1:8765`. On a remote server, forward port 8765 through SSH.
+Open `http://127.0.0.1:8765` on the same machine. When the server runs remotely,
+forward port 8765 from your laptop before opening that address, for example:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 USER@SERVER
+```
 The local version adds a server folder path field and runs the exact same adapter
 and model with native NumPy/pandas. Outputs are isolated in a temporary job
 directory printed at startup; source files and `outputs_raw` are untouched.
@@ -36,6 +41,12 @@ Choose prepared CSV/XLSX tables or the original Raw_data_NNI folder. The UI and
 One workbook with named Weather/Irrigation/Nitrate/Moisture/Plots sheets is
 also supported. Individual files override the corresponding workbook sheet.
 The included example and workbook contain synthetic data only.
+The prepared soil-moisture input accepts the five raw PR2 VWC percentage columns
+from the `Westport` sheet of `Master_PR2_SM.xlsx` (6, 12, 18, 24 and 36 inches).
+Complete rows are integrated over the observed 0–0.9144 m depth, with the default
+model profile matched to that depth. Incomplete rows remain missing, and the raw
+readings are preserved in the input audit and depth chart. A supplied
+`Observed_storage_mm` column remains supported for a complete configured profile.
 
 All `Parameters` fields are exposed. Missing nitrate produces water-only results.
 Missing moisture produces explicitly labeled WB_ETa fallback. The original
@@ -46,6 +57,18 @@ Download all outputs as a ZIP, or the Excel workbook, filtered plot-year CSV,
 and plot-year PDF individually. Inspect the quality/validation tab and exported
 manifest before interpreting results. Computation checks are not evidence of
 field prediction accuracy.
+
+Results can be filtered by site/year, irrigation and nitrogen treatment. The
+daily chart can show any plot in the selected results; records load on demand.
+The treatment/year tab reports counts, missing counts, mean, sample standard
+deviation and range for the selected metric, with a separate CSV export. These
+are descriptive summaries, not tests of treatment effects. The overview shows
+nitrate and measured-water-balance coverage; unobserved values stay missing.
+
+Westport 2023 uses the Westport 2022 plot/treatment layout, confirmed by the user
+on 2026-10-30. Its weather, irrigation, moisture and nitrate remain from 2023.
+An explicit current-year plot-map override still takes precedence. The source
+workbook and confirmation are recorded in each raw run's provenance.
 
 ## Maintain and verify
 

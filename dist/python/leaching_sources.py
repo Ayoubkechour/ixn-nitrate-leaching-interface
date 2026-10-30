@@ -105,6 +105,18 @@ class Sources:
             if 'Rep' not in d:
                 d['Rep'] = d.Plot//100
             return d[required+['Rep']].sort_values('Plot').reset_index(drop=True)
+        if site == 'Westport' and year == 2023:
+            # The field owner confirmed the unchanged layout in this session.
+            # A supplied current-year override above still takes precedence.
+            plan = self.plot_plan('Westport', 2022).copy()
+            source = self.manifest[-1]['path']
+            confirmation = 'User confirmed on 2026-10-30 that Westport 2023 uses the same plot IDs, irrigation treatments, nitrogen treatments and replicates as 2022.'
+            self.record(source, 'user-confirmed Westport 2022 treatment map reused for 2023',
+                        Site=site, Year=year, Source_year=2022,
+                        Confirmation_date='2026-10-30', Confirmation=confirmation)
+            self.issue('Westport-2023', confirmation + ' The incompatible supplied 2023 protocol is not used; weather, irrigation, moisture and nitrate remain from 2023.', severity='provenance')
+            plan.attrs['provenance'] = confirmation
+            return plan
         folder = self.root/site/str(year)/'Experimental_protocol'
         files = sorted(folder.glob('*.xlsx'))
         if len(files) != 1:

@@ -161,7 +161,7 @@ def run(config=None, parameters=None, progress=print):
             # Analyze plots with lab or soil observations. If no observations, full plan.
             if observed_ids:
                 plan = plan.loc[plan.Plot.isin(observed_ids)]
-            dataset_status.append(dict(Site=site,Year=year,Status='included',Plots=len(plan),Reason='Raw inputs and compatible plot-treatment protocol available.'))
+            dataset_status.append(dict(Site=site,Year=year,Status='included',Plots=len(plan),Reason=plan.attrs.get('provenance', 'Raw inputs and compatible plot-treatment protocol available.')))
             profile_p = replace(p, soil_bottom_m=(0.30,0.60,0.90,0.9144)) if site == 'Westport' else p
             for row in plan.itertuples(index=False):
                 di = events.loc[events.Irrigation_treatment == row.Irrigation_treatment, ['Date','Irrigation_mm','Irrigation_observed_mm','Blank_irrigation_imputed']]
