@@ -161,7 +161,7 @@ $('runButton').onclick=async()=>{
   if(!currentRun(run))return;
   if(state.local){await runLocal(config,uploads,run);return;}
   if(!state.worker){
-   const worker=new Worker('worker.js?v=20261030-observations5',{type:'module'});state.worker=worker;
+   const worker=new Worker('worker.js?v=20261030-controls6',{type:'module'});state.worker=worker;
    worker.onmessage=e=>{if(state.worker!==worker)return;const m=e.data;if(m.type==='daily'||m.type==='daily_error'){receiveDaily(m);return;}if(!currentRun(m.run)||!state.busy)return;if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};
    worker.onerror=e=>{if(state.worker!==worker)return;worker.terminate();state.worker=null;if(state.busy)failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);};
   }

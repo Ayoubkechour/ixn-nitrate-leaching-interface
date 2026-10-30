@@ -27,6 +27,10 @@ const axisControls=document.createElement('div');
 axisControls.className='axis-controls';
 axisControls.innerHTML='<label>X axis<select id="chartX" aria-label="X axis"><option value="Plot">Plot</option><option value="Irrigation_treatment">Irrigation treatment</option><option value="Nitrogen_treatment">Nitrogen treatment</option><option value="Year">Year</option><option value="Rain_mm">Rainfall · mm</option><option value="Irrigation_mm">Irrigation · mm</option><option value="Model_ETa_mm">Modeled ET · mm</option><option value="Drainage_mm">Drainage · mm</option><option value="WB_days">Measured WB days</option></select></label>';
 const chartY=$('chartMetric');
+for(const [value,label] of [['ETo_mm','Reference ETo · mm'],['Storage_change_mm','Soil water storage change · mm'],['Storage_initial_mm','Initial soil water storage · mm'],['Storage_final_mm','Final soil water storage · mm'],['Water_stress_days','Modeled water stress · days'],['Mean_Ks','Mean water stress coefficient · 0–1'],['Observed_profiles','Complete soil moisture profiles · dates'],['Nitrate_dates','Valid nitrate concentrations · dates']]){
+ const option=document.createElement('option');option.value=value;option.textContent=label;chartY.append(option);
+}
+for(const option of chartY.options)if(![...$('chartX').options].some(item=>item.value===option.value))$('chartX').append(option.cloneNode(true));
 chartY.parentElement.append(axisControls);
 axisControls.append(chartY);
 const yLabel=document.createElement('label');
@@ -37,14 +41,19 @@ const chartContext=document.createElement('p');
 chartContext.id='chartContext';
 chartContext.className='chart-context';
 $('plotChart').before(chartContext);
+const chartActions=document.createElement('div');chartActions.className='chart-actions';
+chartActions.innerHTML='<button type="button" class="text-button" id="downloadXYFigure">Download figure SVG ↓</button><button type="button" class="text-button" id="downloadXYPairs">Download source CSV ↓</button>';
+$('plotChart').after(chartActions);
 const identityKey=row=>JSON.stringify([row.Dataset,row.Site,row.Year,row.Plot]);
 const finiteValue=value=>typeof value==='number'&&Number.isFinite(value);
 function drawXYChart(rows){
+ state.xyExport=null;
  const xKey=$('chartX').value,yKey=$('chartMetric').value,target=$('plotChart');
  const xLabel=$('chartX').selectedOptions[0].text,yLabel=$('chartMetric').selectedOptions[0].text;
  const valid=rows.filter(row=>finiteValue(row[yKey])&&(xKey==='Plot'||['Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey)||finiteValue(row[xKey])));
  const omitted=rows.length-valid.length;
  $('chartContext').textContent=`${xLabel} × ${yLabel} · ${valid.length} of ${rows.length} plot-year rows shown${omitted?` · ${omitted} with missing values excluded`:''}. ${['Plot','Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey)?'Categorical values are means where grouped; n is shown in tooltips.':'Each point is one plot-year; color denotes irrigation treatment.'}`;
+ $('downloadXYFigure').disabled=$('downloadXYPairs').disabled=!valid.length;
  if(!valid.length){target.innerHTML='<div class="chart-empty">No complete X/Y pairs match these filters. Missing values are not plotted as zero.</div>';return;}
  const categorical=['Plot','Irrigation_treatment','Nitrogen_treatment','Year'].includes(xKey);
  const groups=new Map();
@@ -58,28 +67,40 @@ function drawXYChart(rows){
  if(xMax===xMin){const padding=Math.max(Math.abs(xMin)*.05,1);xMin-=padding;xMax+=padding;}
  const xRange=xMax-xMin;
  const x=v=>left+((v-xMin)/xRange)*(w-left-right);
+ const precision=span=>Math.max(0,Math.min(6,1-Math.floor(Math.log10(Math.abs(span)/4))));
+ const yDigits=precision(yRange),xDigits=precision(xRange);
  const palette={I1:'#6d001f',I2:'#a65a43',I3:'#956e34',I4:'#718072'};
  let svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(yLabel)} by ${esc(xLabel)}"><title>${esc(yLabel)} by ${esc(xLabel)}</title><text x="${left}" y="17" class="axis-unit">${esc(yLabel)}</text>`;
- for(let t=0;t<=4;t++){const value=yMin+(yMax-yMin)*t/4;svg+=`<line x1="${left}" y1="${y(value)}" x2="${w-right}" y2="${y(value)}" stroke="#eee7e2"/><text x="${left-9}" y="${y(value)+4}" text-anchor="end">${number(value,1)}</text>`;}
+ for(let t=0;t<=4;t++){const value=yMin+(yMax-yMin)*t/4;svg+=`<line x1="${left}" y1="${y(value)}" x2="${w-right}" y2="${y(value)}" stroke="#eee7e2"/><text x="${left-9}" y="${y(value)+4}" text-anchor="end">${number(value,yDigits)}</text>`;}
  if(categorical){
   const step=(w-left-right)/data.length,bw=Math.max(3,Math.min(34,step*.7));
   data.forEach((d,i)=>{const cx=left+(i+.5)*step,barY=y(d.value),zero=y(0),fill=xKey==='Plot'?(palette[d.rows[0].Irrigation_treatment]||'#6d001f'):'#8b3851';svg+=`<rect x="${cx-bw/2}" y="${Math.min(barY,zero)}" width="${bw}" height="${Math.max(1,Math.abs(barY-zero))}" rx="2" fill="${fill}"><title>${esc(d.label)} · mean ${number(d.value,2)} · n=${d.values.length}</title></rect>`;if(i%Math.max(1,Math.ceil(data.length/18))===0)svg+=`<text x="${cx}" y="${bottom+20}" text-anchor="middle">${esc(d.label)}</text>`;});
  }else{
-  for(let t=0;t<=4;t++){const value=xMin+(xMax-xMin)*t/4;svg+=`<line x1="${x(value)}" y1="${top}" x2="${x(value)}" y2="${bottom}" stroke="#f5f0ec"/><text x="${x(value)}" y="${bottom+20}" text-anchor="middle">${number(value,1)}</text>`;}
+  for(let t=0;t<=4;t++){const value=xMin+(xMax-xMin)*t/4;svg+=`<line x1="${x(value)}" y1="${top}" x2="${x(value)}" y2="${bottom}" stroke="#f5f0ec"/><text x="${x(value)}" y="${bottom+20}" text-anchor="middle">${number(value,xDigits)}</text>`;}
   for(const row of data){const color=palette[row.Irrigation_treatment]||'#6d001f';svg+=`<circle cx="${x(row[xKey])}" cy="${y(row[yKey])}" r="4.4" fill="${color}" fill-opacity=".77" stroke="#fff" stroke-width="1"><title>${esc(row.Site)} ${row.Year} plot ${esc(row.Plot)} · ${xLabel}: ${number(row[xKey],2)} · ${yLabel}: ${number(row[yKey],2)}</title></circle>`;}
  }
  svg+=`<text x="${(w+left-right)/2}" y="${h-9}" text-anchor="middle">${esc(xLabel)}</text></svg>`;
  const treatments=[...new Set(valid.map(row=>String(row.Irrigation_treatment)))].sort();
  const legend=xKey==='Plot'||!categorical?`<div class="chart-key"><span>Irrigation treatment</span>${treatments.map(label=>`<span><i style="background:${palette[label]||'#6d001f'}"></i>${esc(label)}</span>`).join('')}</div>`:'';
  target.innerHTML=legend+svg;
+ const sources=valid.map(row=>({Dataset:row.Dataset,Site:row.Site,Year:row.Year,Plot:row.Plot,Irrigation_treatment:row.Irrigation_treatment,Nitrogen_treatment:row.Nitrogen_treatment,[xKey]:row[xKey],[yKey]:row[yKey]}));
+ const siteYears=[...new Set(valid.map(row=>`${row.Site} ${row.Year}`))].join('; ');
+ const exportTitle=`${yLabel} by ${xLabel}`;
+ const inner=svg.slice(svg.indexOf('>')+1,svg.lastIndexOf('</svg>'));
+ const legendSVG=treatments.map((label,index)=>`<rect x="${left+index*100}" y="${h+75}" width="9" height="9" fill="${palette[label]||'#6d001f'}"/><text x="${left+14+index*100}" y="${h+83}">${esc(label)}</text>`).join('');
+ const figure=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h+136}" width="${w}" height="${h+136}"><style>text{font:12px Arial,sans-serif;fill:#514742}.axis-unit{font-weight:bold}</style><rect width="100%" height="100%" fill="white"/><text x="${left}" y="21" style="font-size:16px;font-weight:bold">${esc(exportTitle)}</text><text x="${left}" y="42">${esc(siteYears)} · ${valid.length} plot-year rows · ${omitted} missing pairs excluded</text><g transform="translate(0 60)">${inner}</g>${xKey==='Plot'||!categorical?legendSVG:''}<text x="${left}" y="${h+118}">Categorical groups show means; numeric axes show individual plot-years. Descriptive comparison.</text></svg>`;
+ state.xyExport={figure,sources};
 }
 $('chartX').onchange=()=>state.results&&drawXYChart(filteredRows());
+$('downloadXYFigure').onclick=()=>{if(state.xyExport){addDownload('xy_figure',state.xyExport.figure,'image/svg+xml;charset=utf-8');download('xy_figure','plot_year_comparison.svg');}};
+$('downloadXYPairs').onclick=()=>{if(state.xyExport){csvDownload('xy_source',state.xyExport.sources);download('xy_source','plot_year_chart_source.csv');}};
 function csvDownload(key,rows){
  const columns=Object.keys(rows[0]||{}),quote=v=>`"${String(v??'').replace(/"/g,'""')}"`;
  const lines=[columns.map(quote).join(','),...rows.map(row=>columns.map(c=>quote(row[c])).join(','))];
  addDownload(key,'\uFEFF'+lines.join('\r\n'),'text/csv;charset=utf-8');
 }
 function resetExplorer(data){
+ if(window.resetScientificExplorerData)window.resetScientificExplorerData();
  state.dailyRequest++;state.dailyCache=new Map([[String(data.daily_id),{rows:data.daily,observations:data.observations||[]}]]);
  for(const [id,key] of [['irrigationFilter','Irrigation_treatment'],['nitrogenFilter','Nitrogen_treatment']]){
   const values=[...new Set(data.plot_year.map(row=>String(row[key])))].sort();
@@ -164,6 +185,9 @@ function setPlotState(metadata,status,message){
  const label=metadata?`${metadata.Site} ${metadata.Year} · plot ${metadata.Plot}`:'Selected plot';
  $('dailyTitle').textContent=`Daily water budget · ${label}`;
  if($('nitrateChartTitle'))$('nitrateChartTitle').textContent=`Sampled nitrate concentration · ${label}`;
+ const depthHeading=$('depthChartCard')?.querySelector?.('.card-title h2');if(depthHeading)depthHeading.textContent=`Raw soil moisture by depth · ${label}`;
+ const depthNote=$('depthChartCard')?.querySelector?.('.card-title p');if(depthNote)depthNote.textContent=message;
+ const storageNote=$('storageChart')?.closest?.('.card')?.querySelector?.('.card-title p');if(storageNote)storageNote.textContent=message;
  $('dailyCoverage').textContent='';
  $('plotLoadStatus').textContent=`${label} · ${message}`;
  for(const id of ['dailyChart','etChart','nitrateChart','storageChart','depthChart','scientificExplorerCard']){

@@ -23,6 +23,7 @@
  card.id='scientificExplorerCard';card.className='card scientific-explorer-card';
  document.getElementById('results-explorer').append(card);
  let currentRows=[],currentMetadata=null,currentSummary=null,currentObservations=null;
+ let currentPlotKey='',rangeMode='full',rangeFrom='',rangeTo='',displayBounds=['',''];
  const escape=value=>String(value==null?'':value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
  const number=(value,digits=1)=>Number(value).toLocaleString(undefined,{maximumFractionDigits:digits,minimumFractionDigits:digits});
  const numeric=value=>typeof value==='number'&&Number.isFinite(value);
@@ -36,10 +37,21 @@
   for(const row of records(daily))merged.set(String(row.Date).slice(0,10),{...row,Date:String(row.Date).slice(0,10)});
   if(Array.isArray(observations))for(const row of records(observations)){
    const date=String(row.Date).slice(0,10),item=merged.get(date)||{Date:date};
-   for(const key of ['Nitrate_mg_L','Nitrate_original_value','Nitrate_source','Nitrate_status','Nitrate_sample_count','Observed_storage_mm','In_model_period',...series.filter(seriesItem=>seriesItem.panel==='moisture').map(seriesItem=>seriesItem.key)])if(Object.prototype.hasOwnProperty.call(row,key))item[key]=row[key];
+   Object.assign(item,row,{Date:date});
    merged.set(date,item);
   }
   return records([...merged.values()]);
+ }
+ function bounds(rows){return rows.length?[fullDate(rows[0].Date),fullDate(rows[rows.length-1].Date)]:['',''];}
+ function activeBounds(all){
+  const full=bounds(all),model=bounds(records(currentRows));
+  if(rangeMode==='model'&&model[0])return model;
+  if(rangeMode==='custom')return [rangeFrom||full[0],rangeTo||full[1]];
+  return full;
+ }
+ const inRange=(row,from,to)=>fullDate(row.Date)>=from&&fullDate(row.Date)<=to;
+ function rangeControls(full,model,active,visibleCount){
+  return `<div class="scientific-range"><div class="scientific-presets" role="group" aria-label="Date window"><button type="button" data-scientific-preset="full" class="${rangeMode==='full'?'active':''}" aria-pressed="${rangeMode==='full'}">Full sampling window</button><button type="button" data-scientific-preset="model" class="${rangeMode==='model'?'active':''}" aria-pressed="${rangeMode==='model'}" ${model[0]?'':'disabled'}>Modeled period</button></div><label>From<input type="date" data-scientific-date="from" min="${full[0]}" max="${full[1]}" value="${active[0]}"></label><label>To<input type="date" data-scientific-date="to" min="${full[0]}" max="${full[1]}" value="${active[1]}"></label><div class="scientific-export"><button type="button" data-scientific-export="csv" ${visibleCount?'':'disabled'}>Download data CSV</button><button type="button" data-scientific-export="svg" ${visibleCount?'':'disabled'}>Download figure SVG</button></div></div><p class="scientific-range-status">Showing ${visibleCount} dated record${visibleCount===1?'':'s'} from ${escape(active[0])} to ${escape(active[1])}. Empty measurements remain blank.</p>`;
  }
  function niceCeiling(value){
   if(value<=0)return 1;
@@ -64,10 +76,11 @@
   /* Scan by selected item so invalid PR2 values never set the chart scale. */
   const validValues=[];
   for(const row of rows)for(const item of items)if(measured(item,row[item.key]))validValues.push(row[item.key]);
-  if(!validValues.length)return '<div class="scientific-empty">No valid values for these variables in the selected plot and period. Missing and invalid readings stay absent.</div>';
-  const max=niceCeiling(Math.max(...validValues)*1.04),y=value=>bottom-value/max*plotH;
+  const excludedOnly=panel==='nitrate'&&items.some(item=>item.key==='Nitrate_mg_L')&&rows.some(row=>row.Nitrate_status&&!numeric(row.Nitrate_mg_L));
+  if(!validValues.length&&!excludedOnly)return '<div class="scientific-empty">No valid values for these variables in the selected date window. Missing and invalid readings stay absent.</div>';
+  const max=validValues.length?niceCeiling(Math.max(...validValues)*1.04):1,y=value=>bottom-value/max*plotH;
   const digits=axisDecimals(max/4);
-  const times=rows.map(row=>timestamp(row.Date)),minTime=Math.min(...times),lastTime=Math.max(...times),endTime=lastTime===minTime?lastTime+86400000:lastTime;
+  const times=rows.map(row=>timestamp(row.Date)),minTime=timestamp(displayBounds[0]),lastTime=timestamp(displayBounds[1]),endTime=lastTime===minTime?lastTime+86400000:lastTime;
   const xTime=time=>left+(time-minTime)/(endTime-minTime)*plotW;
   const x=index=>xTime(times[index]);
   const dayStep=plotW/Math.max(1,(endTime-minTime)/86400000);
@@ -91,7 +104,7 @@
    let path='',connected=false,lastValidTime=null;
    rows.forEach((row,index)=>{const value=row[item.key];if(measured(item,value)){if(lastValidTime!==null&&times[index]-lastValidTime>129600000)connected=false;path+=`${connected?'L':'M'}${x(index).toFixed(2)},${y(value).toFixed(2)} `;connected=true;lastValidTime=times[index];}else{connected=false;lastValidTime=null;}});
    svg+=`<path d="${path}" fill="none" stroke="${item.color}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" ${item.estimated?'stroke-dasharray="5 5"':''}/>`;
-   rows.forEach((row,index)=>{const value=row[item.key];if(measured(item,value))svg+=`<circle cx="${x(index)}" cy="${y(value)}" r="6" fill="transparent"><title>${escape(dateLabel(row.Date))}: ${escape(item.label)} ${number(value,2)} ${escape(item.unit)}</title></circle>`;});
+   rows.forEach((row,index)=>{const value=row[item.key];if(measured(item,value)){const isolated=!rows.some((other,j)=>j!==index&&Math.abs(times[j]-times[index])<=129600000&&measured(item,other[item.key]));svg+=`<circle cx="${x(index)}" cy="${y(value)}" r="${isolated?4:6}" fill="${isolated?item.color:'transparent'}"><title>${escape(dateLabel(row.Date))}: ${escape(item.label)} ${number(value,2)} ${escape(item.unit)}</title></circle>`;}});
   });
   items.filter(item=>item.mark==='point').forEach(item=>rows.forEach((row,index)=>{
    const value=row[item.key];if(!measured(item,value))return;
@@ -105,15 +118,15 @@
    svg+=`<path d="M${cx-3},${cy-3}L${cx+3},${cy+3}M${cx+3},${cy-3}L${cx-3},${cy+3}" stroke="#9b8379" stroke-width="1.5"><title>${escape(dateLabel(row.Date))}: no valid nitrate concentration · ${escape(row.Nitrate_status)} · original ${escape(row.Nitrate_original_value)}</title></path>`;
   });
   if(showDates){
-   const ticks=6;
+   const ticks=lastTime===minTime?0:6;
    for(let index=0;index<=ticks;index++){
-    const time=minTime+(endTime-minTime)*index/ticks;
+    const time=ticks?minTime+(endTime-minTime)*index/ticks:minTime;
     const crossYear=new Date(minTime).getUTCFullYear()!==new Date(endTime).getUTCFullYear();
     svg+=`<text x="${xTime(time)}" y="${bottom+25}" text-anchor="${index===0?'start':index===ticks?'end':'middle'}">${escape(new Date(time).toLocaleDateString(undefined,crossYear?{month:'short',year:'2-digit',timeZone:'UTC'}:{month:'short',day:'numeric',timeZone:'UTC'}))}</text>`;
    }
   }
   svg+='</svg>';
-  return `<div class="scientific-svg">${svg}</div>`;
+  return `<div class="scientific-svg">${svg}</div>${!validValues.length?'<p class="scientific-note">No valid nitrate concentrations in this range; × marks excluded collection dates on the date axis.</p>':''}`;
  }
  function panel(rows,id,items,showDates){
   const counts=items.map(item=>({item,count:rows.filter(row=>measured(item,row[item.key])).length}));
@@ -122,9 +135,9 @@
   const detail=id==='water'?'Daily modeled fluxes and recorded inputs':id==='load'?'Estimated only within paired valid sample intervals':id==='nitrate'?'Measured points and optional estimated interval line':'Original PR2 sensor depths; measured dates only';
   return `<section class="scientific-panel" aria-label="${escape(panelLabels[id])}"><div class="scientific-panel-heading"><div><h3>${escape(panelLabels[id])}</h3><span>${detail}</span></div><div class="scientific-legend">${legend}</div></div>${chart(rows,id,items,showDates)}${invalid?`<p class="scientific-note">${invalid} out-of-range VWC reading${invalid===1?'':'s'} excluded from this chart; original input remains in the audit.</p>`:''}</section>`;
  }
- function insights(rows){
+ function insights(rows,from,to){
   const messages=[];
-  const modelRows=records(currentRows);
+  const modelRows=records(currentRows).filter(row=>inRange(row,from,to));
   const drainage=series.find(item=>item.key==='Drainage_mm');
   if(selected.has('Drainage_mm')){
    const days=modelRows.filter(row=>measured(drainage,row.Drainage_mm)&&row.Drainage_mm>0);
@@ -149,21 +162,70 @@
   return messages.join(' ');
  }
  function render(){
-  const rows=completeTimeline(currentRows,currentObservations),name=currentMetadata?`${escape(currentMetadata.Site)} ${escape(currentMetadata.Year)} · plot ${escape(currentMetadata.Plot)}${currentMetadata.Dataset?` · ${escape(currentMetadata.Dataset)}`:''}`:'Selected plot';
-  const observed=records(Array.isArray(currentObservations)?currentObservations:currentRows);
+  const all=completeTimeline(currentRows,currentObservations),full=bounds(all),model=bounds(records(currentRows)),active=activeBounds(all);
+  displayBounds=active;
+  const rows=all.filter(row=>inRange(row,active[0],active[1]));
+  const name=currentMetadata?`${escape(currentMetadata.Site)} ${escape(currentMetadata.Year)} · plot ${escape(currentMetadata.Plot)}${currentMetadata.Dataset?` · ${escape(currentMetadata.Dataset)}`:''}`:'Selected plot';
+  const observed=records(Array.isArray(currentObservations)?currentObservations:currentRows).filter(row=>inRange(row,active[0],active[1]));
   const nitrateSamples=observed.filter(row=>row.Nitrate_status||row.Nitrate_source||numeric(row.Nitrate_mg_L));
   const validNitrate=nitrateSamples.filter(row=>numeric(row.Nitrate_mg_L)&&row.Nitrate_mg_L>=0).length;
   const sampleSpan=nitrateSamples.length?`${escape(fullDate(nitrateSamples[0].Date))}–${escape(fullDate(nitrateSamples[nitrateSamples.length-1].Date))}`:'none';
-  const active=series.filter(item=>selected.has(item.key));
-  const activePanels=['water','load','nitrate','moisture'].filter(id=>active.some(item=>item.panel===id));
-  const datePanel=activePanels.map((id,index)=>({id,index})).filter(({id})=>rows.some(row=>active.some(item=>item.panel===id&&measured(item,row[item.key])))).pop();
-  card.innerHTML=`<div class="scientific-header"><div><div class="eyebrow">LINKED FIELD TIMELINE</div><h2>Follow the water, soil and nitrate together</h2><p>${name} · timeline ${rows.length?`${escape(fullDate(rows[0].Date))}–${escape(fullDate(rows[rows.length-1].Date))}`:'no dates'} · ${nitrateSamples.length} nitrate collection dates (${sampleSpan}), ${validNitrate} valid · shared date axis</p></div></div>${controls()}<div class="scientific-panels">${active.length&&rows.length?activePanels.map((id,index)=>panel(rows,id,active.filter(item=>item.panel===id),datePanel&&index===datePanel.index)).join(''):'<div class="scientific-empty">Select at least one variable with available dates to build the timeline.</div>'}</div>${active.length&&rows.length?`<div class="scientific-insight"><strong>From this plot</strong><p>${escape(insights(rows))}</p></div>`:''}<p class="scientific-note">Panels share true dates but use separate scales and units. Pale shading marks the modeled period; hollow observation points are outside it. A × at the nitrate baseline marks a collection date without a valid concentration. Drainage is modeled water flux; the load panel is estimated from paired nitrate intervals with analyte basis from your run settings. Measured nitrate and PR2 VWC are points on observed dates. Missing dates are never filled or interpolated in measured series. These patterns are descriptive and do not establish cause.</p>`;
+  const activeSeries=series.filter(item=>selected.has(item.key));
+  const activePanels=['water','load','nitrate','moisture'].filter(id=>activeSeries.some(item=>item.panel===id));
+  const datePanel=activePanels.map((id,index)=>({id,index})).filter(({id})=>rows.some(row=>activeSeries.some(item=>item.panel===id&&measured(item,row[item.key]))||(id==='nitrate'&&row.Nitrate_status))).pop();
+  card.innerHTML=`<div class="scientific-header"><div><div class="eyebrow">LINKED FIELD TIMELINE</div><h2>Follow the water, soil and nitrate together</h2><p>${name} · selected ${active[0]}–${active[1]} · ${nitrateSamples.length} nitrate collection dates (${sampleSpan}), ${validNitrate} valid</p></div></div>${rangeControls(full,model,active,rows.length)}${controls()}<div class="scientific-panels">${activeSeries.length&&rows.length?activePanels.map((id,index)=>panel(rows,id,activeSeries.filter(item=>item.panel===id),datePanel&&index===datePanel.index)).join(''):'<div class="scientific-empty">No dated records in this range, or no variables selected. Choose another range or variable.</div>'}</div>${activeSeries.length&&rows.length?`<div class="scientific-insight"><strong>From this plot and date range</strong><p>${escape(insights(rows,active[0],active[1]))}</p></div>`:''}<p class="scientific-note">Panels share true dates but use separate scales and units. Pale shading marks the modeled period; hollow observation points are outside it. A × at the nitrate baseline marks a collection date without a valid concentration. Drainage is modeled water flux; the load panel is estimated from paired nitrate intervals with analyte basis from your run settings. Measured nitrate and PR2 VWC are points on observed dates. Missing dates are never filled or interpolated in measured series. These patterns are descriptive and do not establish cause.</p>`;
+ }
+ function saveFile(name,contents,type){
+  const url=URL.createObjectURL(new Blob([contents],{type})),link=document.createElement('a');
+  link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }
+ const exportName=extension=>`ixn_${String(currentMetadata?.Site||'site').replace(/[^a-z0-9]+/gi,'_')}_${currentMetadata?.Year||'year'}_plot_${currentMetadata?.Plot||'plot'}_${displayBounds[0]}_${displayBounds[1]}.${extension}`;
+ function exportCsv(){
+  const rows=completeTimeline(currentRows,currentObservations).filter(row=>inRange(row,displayBounds[0],displayBounds[1]));
+  const fields=['Date','Calendar_year','In_model_period',...series.filter(item=>selected.has(item.key)).map(item=>item.key),'Nitrate_original_value','Nitrate_status','Nitrate_source','Nitrate_date_source','Nitrate_sample_count','Moisture_source','Invalid_VWC_count','Complete_profile','Nitrate_concentration_method','Nitrate_load_basis'];
+  const unique=[...new Set(fields)],quote=value=>`"${String(value==null?'':value).replace(/"/g,'""')}"`;
+  const heading=['Dataset','Site','Study_year','Plot',...unique.map(key=>{const item=series.find(value=>value.key===key);return item?`${key} [${item.unit}]`:key;})];
+  const lines=[heading.map(quote).join(','),...rows.map(row=>[currentMetadata?.Dataset,currentMetadata?.Site,currentMetadata?.Year,currentMetadata?.Plot,...unique.map(key=>key==='In_model_period'&&row[key]==null?records(currentRows).some(day=>fullDate(day.Date)===fullDate(row.Date)):row[key])].map(quote).join(','))];
+  saveFile(exportName('csv'),'\uFEFF'+lines.join('\r\n'),'text/csv;charset=utf-8');
+ }
+ function exportSvg(){
+  const panels=[...card.querySelectorAll('.scientific-panel')].map(element=>({
+   title:element.querySelector('h3')?.textContent||'',
+   svg:element.querySelector('.scientific-svg svg'),
+   group:[...element.querySelectorAll('.scientific-legend-item')].map(item=>({label:item.textContent.trim(),color:item.querySelector('i')?.style.background||'#6d001f'}))
+  })).filter(item=>item.svg);
+  if(!panels.length)return;
+  const plotted=completeTimeline(currentRows,currentObservations).filter(row=>inRange(row,displayBounds[0],displayBounds[1]));
+  const identity=`${currentMetadata?.Dataset||'Dataset'} · ${currentMetadata?.Site||'Site'} ${currentMetadata?.Year||''} · plot ${currentMetadata?.Plot||''}`;
+  let y=105,body='';
+  for(const item of panels){
+   const viewBox=item.svg.getAttribute('viewBox')||'0 0 960 238',height=Number(viewBox.split(/\s+/)[3])||238;
+   const keys=item.group.map((key,index)=>`<rect x="${30+index*190}" y="${y+12}" width="9" height="9" fill="${escape(key.color)}"/><text x="${43+index*190}" y="${y+21}" font-size="11" fill="#655a55">${escape(key.label)}</text>`).join('');
+   body+=`<text x="30" y="${y}" font-size="19" font-weight="700" fill="#342b29">${escape(item.title)}</text>${keys}<svg x="20" y="${y+28}" width="960" height="${height}" viewBox="${viewBox}" font-size="12" fill="#756b66">${item.svg.innerHTML}</svg>`;
+   y+=height+75;
+  }
+  const totalHeight=y+65;
+  const figure=`<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="1000" height="${totalHeight}" viewBox="0 0 1000 ${totalHeight}" font-family="Arial, sans-serif"><title>IXN field timeline · ${escape(identity)}</title><desc>Selected date range ${escape(displayBounds[0])} through ${escape(displayBounds[1])}. Separate axes and units. Pale shading marks the modeled period; sampled nitrate and VWC are observation points.</desc><rect width="1000" height="${totalHeight}" fill="#fffdfb"/><text x="30" y="40" font-size="24" font-weight="700" fill="#6D001F">IXN field timeline</text><text x="30" y="66" font-size="14" fill="#342b29">${escape(identity)} · ${escape(displayBounds[0])} to ${escape(displayBounds[1])} · ${plotted.length} dated records</text>${body}<text x="30" y="${totalHeight-33}" font-size="11" fill="#655a55">Modeled fluxes and estimated load are distinct from measured nitrate and soil moisture. Missing values are not zero.</text></svg>`;
+  saveFile(exportName('svg'),figure,'image/svg+xml;charset=utf-8');
  }
  card.addEventListener('change',event=>{
-  const input=event.target;if(!input.matches('[data-scientific-series]'))return;
-  if(input.checked)selected.add(input.dataset.scientificSeries);else selected.delete(input.dataset.scientificSeries);
-  render();
+  const input=event.target;
+  if(input.matches('[data-scientific-series]')){if(input.checked)selected.add(input.dataset.scientificSeries);else selected.delete(input.dataset.scientificSeries);render();return;}
+  if(input.matches('[data-scientific-date]')){
+   const all=bounds(completeTimeline(currentRows,currentObservations)),from=input.dataset.scientificDate==='from'?input.value:card.querySelector('[data-scientific-date="from"]').value,to=input.dataset.scientificDate==='to'?input.value:card.querySelector('[data-scientific-date="to"]').value;
+   rangeFrom=from<all[0]?all[0]:from>all[1]?all[1]:from;rangeTo=to<all[0]?all[0]:to>all[1]?all[1]:to;
+   if(rangeFrom>rangeTo){if(input.dataset.scientificDate==='from')rangeTo=rangeFrom;else rangeFrom=rangeTo;}
+   rangeMode='custom';render();
+  }
  });
- window.drawScientificExplorer=(rows,metadata,summary,observations)=>{currentRows=rows;currentMetadata=metadata;currentSummary=summary;currentObservations=observations;render();};
- window.resetScientificExplorerData=()=>{currentRows=[];currentMetadata=null;currentSummary=null;currentObservations=null;};
+ card.addEventListener('click',event=>{
+  const preset=event.target.closest('[data-scientific-preset]');if(preset){rangeMode=preset.dataset.scientificPreset;rangeFrom='';rangeTo='';render();return;}
+  const exportButton=event.target.closest('[data-scientific-export]');if(exportButton){if(exportButton.dataset.scientificExport==='csv')exportCsv();else exportSvg();}
+ });
+ window.drawScientificExplorer=(rows,metadata,summary,observations)=>{
+  const key=JSON.stringify([metadata?.Dataset,metadata?.Site,metadata?.Year,metadata?.Plot]);
+  if(key!==currentPlotKey){currentPlotKey=key;rangeMode='full';rangeFrom='';rangeTo='';}
+  currentRows=rows;currentMetadata=metadata;currentSummary=summary;currentObservations=observations;render();
+ };
+ window.resetScientificExplorerData=()=>{currentRows=[];currentMetadata=null;currentSummary=null;currentObservations=null;currentPlotKey='';rangeMode='full';rangeFrom='';rangeTo='';};
 })();
