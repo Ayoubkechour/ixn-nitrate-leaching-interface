@@ -210,6 +210,39 @@ def daily_leaching_estimates(daily, intervals):
     return daily
 
 
+OBSERVATION_COLUMNS = ['Date', 'Dataset', 'Site', 'Year', 'Plot', 'Calendar_year', 'Nitrate_mg_L',
+    'Nitrate_original_value', 'Nitrate_source', 'Nitrate_date_source', 'Nitrate_status',
+    'Nitrate_sample_count', 'Observed_storage_mm', 'Moisture_source',
+    'Invalid_VWC_count', 'Complete_profile'] + PR2_COLUMNS
+
+
+def observation_timeline(nitrate, moisture):
+    """Join source observations by exact plot and date, retaining out-of-season rows."""
+    keys = ['Dataset', 'Site', 'Year', 'Plot', 'Date']
+    sources = []
+    for table in [nitrate, moisture]:
+        if table is None or table.empty:
+            continue
+        source = table.copy()
+        source['Date'] = pd.to_datetime(source.Date, errors='raise').dt.normalize()
+        source['Calendar_year'] = source.Date.dt.year
+        source['Year'] = source.Year.astype(int)
+        source['Plot'] = source.Plot.astype(int)
+        if source.duplicated(keys).any():
+            raise ValueError('Source observations must be unique by dataset/site/year/plot/date.')
+        sources.append(source)
+    if not sources:
+        return pd.DataFrame(columns=OBSERVATION_COLUMNS)
+    joined = sources[0]
+    for source in sources[1:]:
+        joined = joined.merge(source.drop(columns='Calendar_year'), on=keys, how='outer', validate='one_to_one')
+    joined['Calendar_year'] = joined.Date.dt.year
+    for column in OBSERVATION_COLUMNS:
+        if column not in joined:
+            joined[column] = np.nan if column not in ['Nitrate_source','Nitrate_date_source','Nitrate_status','Moisture_source'] else None
+    return joined[OBSERVATION_COLUMNS].sort_values(keys).reset_index(drop=True)
+
+
 def analyze(request, workspace, progress=print):
     workspace = Path(workspace)
     output = workspace / 'results'
@@ -256,6 +289,34 @@ def analyze(request, workspace, progress=print):
         plot_year = results['plot_year']
         daily = results['daily']
         load_intervals = results['leaching']
+        raw_nitrate = pd.read_csv(output/'nitrate_samples.csv')
+        if not raw_nitrate.empty:
+            raw_nitrate['Date'] = pd.to_datetime(raw_nitrate.Date).dt.normalize()
+            raw_keys = ['Dataset', 'Site', 'Year', 'Plot', 'Date']
+            raw_nitrate['Dataset'] = 'raw_IXN'
+            positions = raw_nitrate.groupby(raw_keys + ['Position'], as_index=False).agg(
+                Nitrate_mg_L=('Nitrate_mg_L', 'mean'), Valid_lab_samples=('Nitrate_mg_L', 'count'))
+            nitrate_observations = positions.groupby(raw_keys, as_index=False).agg(
+                Nitrate_mg_L=('Nitrate_mg_L', 'mean'), Nitrate_sample_count=('Valid_lab_samples', 'sum'))
+            provenance = raw_nitrate.groupby(raw_keys, as_index=False).agg(
+                Nitrate_original_value=('Nitrate', lambda values: '; '.join(values.dropna().astype(str))),
+                Nitrate_date_source=('Date_source', lambda values: ', '.join(sorted(set(values.dropna().astype(str))))),
+                Nitrate_status=('Nitrate_status', lambda values: ', '.join(sorted(set(values.dropna().astype(str))))))
+            nitrate_observations = nitrate_observations.merge(provenance, on=raw_keys, validate='one_to_one')
+            nitrate_observations['Nitrate_source'] = 'Raw laboratory workbook; valid positions averaged by plot/date'
+        else:
+            nitrate_observations = pd.DataFrame()
+        raw_moisture = pd.read_csv(output/'moisture_audit.csv')
+        if not raw_moisture.empty:
+            moisture_observations = validate_table(raw_moisture, 'moisture')
+            moisture_observations['Dataset'] = 'raw_IXN'
+            moisture_observations['Site'] = 'Westport'
+            moisture_observations['Year'] = moisture_observations.Date.dt.year
+            moisture_observations['Moisture_source'] = 'Raw PR2 workbook; original depth percentages'
+            moisture_observations = moisture_observations[['Dataset','Site','Year','Plot','Date','Observed_storage_mm',
+                'Invalid_VWC_count','Complete_profile','Moisture_source'] + PR2_COLUMNS]
+        else:
+            moisture_observations = pd.DataFrame()
         checks = results['checks']
         quality = results['data_quality']
     elif mode == 'tables':
@@ -320,6 +381,9 @@ def analyze(request, workspace, progress=print):
                     raise ValueError(role.capitalize() + ': negative measurements are invalid.')
                 if role == 'nitrate':
                     sentinel = tables[role][col].isin([999, 9999])
+                    tables[role]['Nitrate_original_value'] = tables[role][col]
+                    tables[role]['Nitrate_status'] = np.where(sentinel, 'sentinel_missing',
+                        np.where(tables[role][col].isna(), 'missing', 'valid'))
                     if sentinel.any():
                         tables[role].loc[sentinel, col] = np.nan
                         note(str(int(sentinel.sum())) + ' nitrate sentinels (999/9999) retained as missing.')
@@ -360,6 +424,29 @@ def analyze(request, workspace, progress=print):
         dataset = str(request.get('dataset', '')).strip()
         if not site or not dataset:
             raise ValueError('Enter a site name and dataset name.')
+        if 'nitrate' in tables:
+            nitrate_observations = tables['nitrate'].copy()
+            nitrate_observations['Dataset'] = dataset
+            nitrate_observations['Site'] = site
+            nitrate_observations['Year'] = planting.year
+            nitrate_observations['Nitrate_sample_count'] = nitrate_observations.Nitrate_mg_L.notna().astype(int)
+            nitrate_observations['Nitrate_source'] = 'Uploaded nitrate table'
+            nitrate_observations['Nitrate_date_source'] = 'uploaded_date'
+            nitrate_observations = nitrate_observations[['Dataset','Site','Year','Plot','Date','Nitrate_mg_L',
+                'Nitrate_original_value','Nitrate_status','Nitrate_sample_count','Nitrate_source','Nitrate_date_source']]
+        else:
+            nitrate_observations = pd.DataFrame()
+        if 'moisture' in tables:
+            moisture_observations = tables['moisture'].copy()
+            moisture_observations['Dataset'] = dataset
+            moisture_observations['Site'] = site
+            moisture_observations['Year'] = planting.year
+            moisture_observations['Moisture_source'] = 'Uploaded moisture table'
+            moisture_columns = ['Dataset','Site','Year','Plot','Date','Observed_storage_mm','Moisture_source',
+                'Invalid_VWC_count','Complete_profile'] + PR2_COLUMNS
+            moisture_observations = moisture_observations[[column for column in moisture_columns if column in moisture_observations]]
+        else:
+            moisture_observations = pd.DataFrame()
         for role, table in tables.items():
             if role != 'weather' and 'Date' in table:
                 outside = ~table.Date.between(weather.Date.min(), end)
@@ -450,20 +537,44 @@ def analyze(request, workspace, progress=print):
     preview_folder.mkdir(exist_ok=True)
     daily = daily_leaching_estimates(daily, load_intervals)
     daily.to_csv(output/'daily_explorer.csv.gz', index=False, compression='gzip')
+    observations = observation_timeline(nitrate_observations, moisture_observations)
+    identities = ['Dataset', 'Site', 'Year', 'Plot']
+    if not observations.empty:
+        periods = plot_year[identities + ['Start_date', 'End_date']].drop_duplicates(identities)
+        observations = observations.merge(periods, on=identities, how='inner', validate='many_to_one')
+        observations['In_model_period'] = observations.Date.ge(pd.to_datetime(observations.Start_date)) & observations.Date.le(pd.to_datetime(observations.End_date))
+        observations = observations.drop(columns=['Start_date', 'End_date'])
+    else:
+        observations['In_model_period'] = pd.Series(dtype=bool)
+    observations.to_csv(output/'observations_full.csv.gz', index=False, compression='gzip')
     monthly_et = monthly_et_table(daily)
     monthly_et.to_csv(output/'monthly_et.csv', index=False)
     daily_columns = ['Date', 'Rain_mm', 'Irrigation_mm', 'ETo_mm', 'ETa_model_mm', 'Drainage_mm', 'Storage_end_mm', 'Observed_storage_mm', 'Nitrate_mg_L',
                      'Nitrate_concentration_estimated_mg_L', 'Nitrate_load_estimated_kg_ha_day', 'Nitrate_concentration_method', 'Nitrate_load_basis'] + PR2_COLUMNS
-    identities = ['Dataset', 'Site', 'Year', 'Plot']
     daily_plots = []
+    observation_folder = workspace/'observation_previews'
+    observation_folder.mkdir(exist_ok=True)
     for index, (identity, group) in enumerate(daily.groupby(identities, sort=True)):
         records = json_records(group.sort_values('Date')[[c for c in daily_columns if c in group]])
         (preview_folder/(str(index)+'.json')).write_text(json.dumps(records, allow_nan=False))
-        daily_plots.append(dict(id=str(index), **dict(zip(identities, identity))))
+        metadata = dict(zip(identities, identity))
+        selected = observations
+        for column, value in metadata.items():
+            selected = selected.loc[selected[column].eq(value)]
+        selected = selected.copy()
+        observation_records = json_records(selected)
+        (observation_folder/(str(index)+'.json')).write_text(json.dumps(observation_records, allow_nan=False))
+        nitrate_dates = selected.loc[selected.Nitrate_mg_L.notna(), 'Date']
+        date_label = lambda value: value.date().isoformat() if pd.notna(value) else None
+        daily_plots.append(dict(id=str(index), **metadata,
+            observation_count=len(selected), nitrate_sample_count=len(nitrate_dates),
+            nitrate_start=date_label(nitrate_dates.min()), nitrate_end=date_label(nitrate_dates.max()),
+            observation_start=date_label(selected.Date.min()), observation_end=date_label(selected.Date.max())))
     first = plot_year.iloc[0]
     first_preview = next(item for item in daily_plots if all(item[key] == first[key] for key in identities))
     payload = dict(plot_year=json_records(plot_year), checks=json_records(checks), issues=json_records(quality),
         daily=json.loads((preview_folder/(first_preview['id']+'.json')).read_text()),
+        observations=json.loads((observation_folder/(first_preview['id']+'.json')).read_text()),
         monthly_et=json_records(monthly_et),
         daily_plots=json_records(pd.DataFrame(daily_plots)), daily_id=first_preview['id'],
         daily_plot=int(first.Plot), daily_rows=len(daily),

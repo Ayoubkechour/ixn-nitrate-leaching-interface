@@ -48,6 +48,15 @@ async def main():
             await page.locator('[data-result-tab="daily"]').click()
             await page.locator('#dailyPlot').select_option(index=2)
             await page.wait_for_function("document.querySelector('#dailyTitle').textContent.includes('plot 103') && !!document.querySelector('#dailyChart svg')")
+            await page.wait_for_function("document.querySelector('#nitrateChartTitle').textContent.includes('plot 103') && document.querySelector('#nitrateSamplesTable tbody tr')")
+            sample_check=await page.evaluate("""() => {
+                const selected = document.querySelector('#dailyPlot').value;
+                const cache = state.dailyCache.get(selected);
+                const sample = cache.observations.find(row => Number.isFinite(row.Nitrate_mg_L));
+                return {plot: sample.Plot, value: sample.Nitrate_mg_L, table: document.querySelector('#nitrateSamplesTable').textContent};
+            }""")
+            assert sample_check['plot']==103,sample_check
+            assert f"{sample_check['value']:.3f}" in sample_check['table'],sample_check
             assert await page.locator('#storageChart svg').count()==1
             assert await page.locator('#etChart svg').count()==1
             await page.locator('[data-et-view="cumulative"]').click()
@@ -80,7 +89,7 @@ async def main():
             assert await page.locator('#resultsTable tbody tr').count()==4
             await page.locator('#irrigationFilter').select_option('all')
             await page.locator('#nitrogenFilter').select_option('all')
-            await page.locator('[data-result-tab="plots"]').click()
+            await page.locator('[data-result-tab="data"]').click()
             await page.locator('#chartMetric').select_option('Drainage_mm')
             assert await page.locator('#resultsTable tbody tr').count()==96
             await page.locator('#resultFilter').select_option(index=1)
@@ -89,7 +98,7 @@ async def main():
                 await page.locator('#downloadAll').click()
             download=await download_info.value
             await download.save_as(f'/tmp/ixn_{mode}_outputs.zip')
-            await page.locator('[data-result-tab="quality"]').click()
+            await page.locator('[data-result-tab="data"]').click()
             assert await page.locator('#checksList .quality-item').count()>=8
             result=await page.evaluate('state.results')
             Path(f'/tmp/ixn_{mode}_preview.json').write_text(json.dumps(result))

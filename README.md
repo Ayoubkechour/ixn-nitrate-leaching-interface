@@ -74,6 +74,12 @@ daily chart can show any plot in the selected results; records load on demand.
 The Scientific explorer aligns selected water fluxes, estimated nitrate load,
 measured nitrate concentration, and raw PR2 depth readings by date for one plot.
 Variables can be switched on or off; each unit keeps its own labeled panel.
+The observation timeline keeps all uploaded collection dates, including dates
+outside the modeled season. The model period is shaded, and a nitrate sample
+table lists original values, validated concentrations, and quality status.
+Changing plots replaces every dependent chart together; stale or mismatched
+responses are rejected. Full observation records are exported in
+`observations_full.csv.gz` inside the ZIP.
 Estimated load appears only within valid paired sample intervals and remains
 distinct from the measured concentration points.
 The Data & quality view also offers configurable X and Y axes for plot-year

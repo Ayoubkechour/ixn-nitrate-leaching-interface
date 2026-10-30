@@ -178,6 +178,39 @@ class InputTests(unittest.TestCase):
         self.assertEqual(plan.Nitrogen_treatment.nunique(),6)
         self.assertTrue(plan.groupby(['Irrigation_treatment','Nitrogen_treatment']).size().eq(4).all())
 
+    def test_observation_timeline_keeps_distinct_plots_and_out_of_model_samples(self):
+        with patch('interface_engine.draw_plot_year_figures',return_value=pd.DataFrame()):
+            baseline,_=analyze(self.config,self.root/'baseline',lambda message:None)
+            nitrate=pd.read_csv(self.config['files']['nitrate'])
+            nitrate=pd.concat([nitrate,pd.DataFrame([
+                dict(Date='2021-12-31',Plot=101,Nitrate_mg_L=73.0),
+                dict(Date='2022-04-10',Plot=101,Nitrate_mg_L=91.0),
+                dict(Date='2022-09-05',Plot=101,Nitrate_mg_L=82.0),
+            ])],ignore_index=True)
+            nitrate_path=self.root/'extended_nitrate.csv';nitrate.to_csv(nitrate_path,index=False)
+            self.config['files']['nitrate']=str(nitrate_path)
+            extended,_=analyze(self.config,self.root/'extended',lambda message:None)
+        original={row['Plot']:row for row in baseline['plot_year']}
+        for row in extended['plot_year']:
+            for metric in ['Model_ETa_mm','Drainage_mm','Load_kg_ha']:
+                self.assertAlmostEqual(row[metric],original[row['Plot']][metric],places=8,msg=metric)
+        plot101=next(row for row in extended['daily_plots'] if row['Plot']==101)
+        plot102=next(row for row in extended['daily_plots'] if row['Plot']==102)
+        self.assertEqual(plot101['nitrate_sample_count'],9)
+        self.assertEqual(plot102['nitrate_sample_count'],6)
+        self.assertEqual(plot101['nitrate_start'],'2021-12-31')
+        self.assertEqual(plot101['nitrate_end'],'2022-09-05')
+        obs101=json.loads((self.root/'extended'/'observation_previews'/(plot101['id']+'.json')).read_text())
+        obs102=json.loads((self.root/'extended'/'observation_previews'/(plot102['id']+'.json')).read_text())
+        self.assertEqual(extended['observations'],obs101)
+        self.assertNotEqual([r['Nitrate_mg_L'] for r in obs101],[r['Nitrate_mg_L'] for r in obs102])
+        outside={r['Date'][:10]:r for r in obs101 if not r['In_model_period']}
+        self.assertEqual(set(outside),{'2021-12-31','2022-04-10','2022-09-05'})
+        self.assertEqual(outside['2021-12-31']['Year'],2022)
+        self.assertEqual(outside['2021-12-31']['Calendar_year'],2021)
+        self.assertEqual(outside['2022-04-10']['Nitrate_mg_L'],91.0)
+        self.assertEqual(outside['2022-09-05']['Nitrate_mg_L'],82.0)
+
     def test_pr2_rejects_unmatched_custom_profile(self):
         self.config['parameters']={'soil_bottom_m':[.3,.6,.9,1.1]}
         with self.assertRaisesRegex(ValueError,'0.9144 m'):

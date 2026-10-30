@@ -19,6 +19,9 @@ plotSelectorRow.id='plotSelectorRow';
 plotSelectorRow.className='plot-selector-row hidden';
 plotSelectorRow.innerHTML='<div><strong>Explore one plot</strong><span>Change the plot to update ET, nitrate and soil observations together.</span></div>';
 plotSelectorRow.append($('dailyPlot').parentElement);
+const plotLoadStatus=document.createElement('p');
+plotLoadStatus.id='plotLoadStatus';plotLoadStatus.setAttribute('role','status');plotLoadStatus.setAttribute('aria-live','polite');
+plotSelectorRow.append(plotLoadStatus);
 document.querySelector('.result-filters').after(plotSelectorRow);
 const axisControls=document.createElement('div');
 axisControls.className='axis-controls';
@@ -48,9 +51,12 @@ function drawXYChart(rows){
  if(categorical)for(const row of valid){const label=xKey==='Plot'?`${row.Plot}`:String(row[xKey]);const key=xKey==='Plot'?`${row.Dataset} / ${row.Site} / ${row.Year} / ${label}`:label;if(!groups.has(key))groups.set(key,{label,values:[],rows:[]});const group=groups.get(key);group.values.push(row[yKey]);group.rows.push(row);}
  const data=categorical?[...groups.values()].map(g=>({...g,value:g.values.reduce((a,b)=>a+b,0)/g.values.length})).sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true})):valid;
  const w=Math.max(820,categorical?data.length*15+110:820),h=320,left=70,right=25,top=32,bottom=266;
- const yMin=Math.min(0,...data.map(d=>categorical?d.value:d[yKey])),yMax=Math.max(0,...data.map(d=>categorical?d.value:d[yKey]));
+ const yMin=Math.min(0,...data.map(d=>categorical?d.value:d[yKey]));let yMax=Math.max(0,...data.map(d=>categorical?d.value:d[yKey]));
+ if(yMax===yMin)yMax=yMin+1;
  const yRange=yMax-yMin||1,y=v=>bottom-(v-yMin)/yRange*(bottom-top);
- const xValues=categorical?[]:data.map(row=>row[xKey]);const xMin=categorical?0:Math.min(...xValues),xMax=categorical?1:Math.max(...xValues),xRange=xMax-xMin||1;
+ const xValues=categorical?[]:data.map(row=>row[xKey]);let xMin=categorical?0:Math.min(...xValues),xMax=categorical?1:Math.max(...xValues);
+ if(xMax===xMin){const padding=Math.max(Math.abs(xMin)*.05,1);xMin-=padding;xMax+=padding;}
+ const xRange=xMax-xMin;
  const x=v=>left+((v-xMin)/xRange)*(w-left-right);
  const palette={I1:'#6d001f',I2:'#a65a43',I3:'#956e34',I4:'#718072'};
  let svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(yLabel)} by ${esc(xLabel)}"><title>${esc(yLabel)} by ${esc(xLabel)}</title><text x="${left}" y="17" class="axis-unit">${esc(yLabel)}</text>`;
@@ -74,7 +80,7 @@ function csvDownload(key,rows){
  addDownload(key,'\uFEFF'+lines.join('\r\n'),'text/csv;charset=utf-8');
 }
 function resetExplorer(data){
- state.dailyRequest++;state.dailyCache=new Map([[String(data.daily_id),data.daily]]);
+ state.dailyRequest++;state.dailyCache=new Map([[String(data.daily_id),{rows:data.daily,observations:data.observations||[]}]]);
  for(const [id,key] of [['irrigationFilter','Irrigation_treatment'],['nitrogenFilter','Nitrogen_treatment']]){
   const values=[...new Set(data.plot_year.map(row=>String(row[key])))].sort();
   $(id).innerHTML='<option value="all">All treatments</option>'+values.map(value=>`<option>${esc(value)}</option>`).join('');
@@ -152,37 +158,62 @@ function renderTreatmentMatrix(rows,metric,target=treatmentMatrix,asSiteOverview
  const label=asSiteOverview?'Modeled ET · mm':$('comparisonMetric').selectedOptions[0].text;
  target.innerHTML=`<div class="matrix-heading"><div><strong>${asSiteOverview?'Site-year ET across all plots':'Treatment pattern'} · ${esc(siteYears[0])}</strong><span>${esc(label)} · mean across plots; descriptive only</span></div><span>Rows: irrigation · columns: nitrogen</span></div><div class="matrix-scroll"><table><thead><tr><th scope="col">Irrigation</th>${header}</tr></thead><tbody>${body}</tbody></table></div><div class="matrix-footnote">Cell shading is relative to this selected site/year and metric. Missing values stay blank; n counts plots with a value.</div>`;
 }
-function displayDaily(rows,metadata){
+function setPlotState(metadata,status,message){
+ if(window.resetPlotChartData)window.resetPlotChartData();
+ document.querySelectorAll('[data-et-view],[data-depth-view]').forEach(button=>button.disabled=true);
+ const label=metadata?`${metadata.Site} ${metadata.Year} · plot ${metadata.Plot}`:'Selected plot';
+ $('dailyTitle').textContent=`Daily water budget · ${label}`;
+ if($('nitrateChartTitle'))$('nitrateChartTitle').textContent=`Sampled nitrate concentration · ${label}`;
+ $('dailyCoverage').textContent='';
+ $('plotLoadStatus').textContent=`${label} · ${message}`;
+ for(const id of ['dailyChart','etChart','nitrateChart','storageChart','depthChart','scientificExplorerCard']){
+  const target=$(id);if(!target)continue;
+  target.setAttribute('aria-busy',String(status==='loading'));
+  target.dataset.plotKey=metadata?identityKey(metadata):'';
+  target.innerHTML=`<div class="chart-empty" role="${status==='error'?'alert':'status'}">${esc(label)} · ${esc(message)}</div>`;
+ }
+ for(const id of ['etTotals','depthChartLegend'])if($(id))$(id).innerHTML='';
+ if($('nitrateChartNote'))$('nitrateChartNote').textContent=`${label} · ${message}`;
+}
+function displayDaily(rows,metadata,observations=[]){
+ document.querySelectorAll('[data-et-view],[data-depth-view]').forEach(button=>button.disabled=false);
+ for(const id of ['dailyChart','etChart','nitrateChart','storageChart','depthChart','scientificExplorerCard']){
+  const target=$(id);if(target){target.setAttribute('aria-busy','false');target.dataset.plotKey=identityKey(metadata);}
+ }
  $('dailyTitle').textContent=`Daily water budget · ${metadata.Site} ${metadata.Year} · plot ${metadata.Plot}`;
  const summary=state.results.plot_year.find(row=>identityKey(row)===identityKey(metadata));
  $('dailyCoverage').textContent=summary?`${summary.Days} model days · ${summary.WB_days} days with measured WB · ${summary.Leaching_days} days covered by nitrate sample intervals. WB source: ${summary.WB_ETa_source.replace(/_/g,' ')}.`:'';
+ const nitrate=observations.filter(row=>finiteValue(row.Nitrate_mg_L));
+ $('plotLoadStatus').textContent=`${metadata.Site} ${metadata.Year} · plot ${metadata.Plot} · ${nitrate.length} nitrate sample dates${nitrate.length?` · ${nitrate[0].Date.slice(0,10)} to ${nitrate[nitrate.length-1].Date.slice(0,10)}`:''}`;
  drawDaily(rows);
  drawET(rows);
- drawNitrate(rows);
- drawStorage(rows);
- drawDepthReadings(rows);
- if(window.drawScientificExplorer)window.drawScientificExplorer(rows,metadata,summary);
+ drawNitrate(rows,metadata,summary,observations);
+ drawStorage(rows,metadata,summary,observations);
+ drawDepthReadings(rows,metadata,summary,observations);
+ if(window.drawScientificExplorer)window.drawScientificExplorer(rows,metadata,summary,observations);
 }
 async function updateDailyPlot(){
  const id=$('dailyPlot').value,request=++state.dailyRequest;
  const metadata=state.results?.daily_plots.find(row=>String(row.id)===id);
- if(!metadata){$('dailyTitle').textContent='Daily water budget';$('dailyChart').innerHTML='<div class="chart-empty">No plots match these filters.</div>';$('dailyCoverage').textContent='';return;}
- if(state.dailyCache.has(id)){displayDaily(state.dailyCache.get(id),metadata);return;}
- $('dailyChart').innerHTML='<div class="chart-empty" role="status">Loading selected plot…</div>';
+ if(!metadata){setPlotState(null,'empty','No plots match these filters.');return;}
+ if(state.dailyCache.has(id)){const cached=state.dailyCache.get(id);displayDaily(cached.rows,metadata,cached.observations);return;}
+ setPlotState(metadata,'loading','Loading records and full sampling window…');
  try{
   if(state.local){
-   const response=await fetch(`/api/jobs/${state.completedJob}/files/daily_previews/${id}.json`);
-   if(!response.ok)throw Error('Daily records could not be loaded. Try selecting the plot again.');
-   receiveDaily({type:'daily',id,request,rows:await response.json()});
+   const responses=await Promise.all(['daily_previews','observation_previews'].map(folder=>fetch(`/api/jobs/${state.completedJob}/files/${folder}/${id}.json`)));
+   if(responses.some(response=>!response.ok))throw Error('Selected plot records could not be loaded. Try selecting the plot again.');
+   const [rows,observations]=await Promise.all(responses.map(response=>response.json()));
+   receiveDaily({type:'daily',id,request,rows,observations});
   }else state.worker.postMessage({type:'daily',id,request});
- }catch(error){receiveDaily({type:'daily_error',request,message:error.message});}
+ }catch(error){receiveDaily({type:'daily_error',id,request,message:error.message});}
 }
 function receiveDaily(message){
- if(message.request!==state.dailyRequest||!state.results)return;
- if(message.type==='daily_error'){$('dailyChart').innerHTML=`<div class="chart-empty" role="alert">${esc(message.message)}</div>`;return;}
+ if(message.request!==state.dailyRequest||!state.results||String(message.id)!==$('dailyPlot').value)return;
  const metadata=state.results.daily_plots.find(row=>String(row.id)===String(message.id));
  if(!metadata)return;
- state.dailyCache.set(String(message.id),message.rows);displayDaily(message.rows,metadata);
+ if(message.type==='daily_error'){setPlotState(metadata,'error',message.message);return;}
+ if(!Array.isArray(message.rows)||!Array.isArray(message.observations)||message.observations.some(row=>identityKey(row)!==identityKey(metadata))){setPlotState(metadata,'error','These records do not match the selected plot. Select the plot again.');return;}
+ state.dailyCache.set(String(message.id),{rows:message.rows,observations:message.observations});displayDaily(message.rows,metadata,message.observations);
 }
 $('dailyPlot').onchange=updateDailyPlot;
 $('irrigationFilter').onchange=renderResults;$('nitrogenFilter').onchange=renderResults;

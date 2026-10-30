@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state = {mode:'tables',files:{},rawFiles:[],worker:null,busy:false,local:false,results:null,downloads:{},job:null,poll:null,resultTab:'plots'};
+const state = {mode:'tables',files:{},rawFiles:[],worker:null,busy:false,local:false,results:null,downloads:{},job:null,poll:null,runGeneration:0,resultTab:'plots'};
 const schema = {
  weather:{title:'Weather',required:true,description:'Daily temperatures, humidity, wind, solar radiation and rainfall.',columns:'Date, Tmax_C, Tmin_C, Wind_m_s, Rs_MJ_m2_day, Rain_mm, Tdew_C (or RHmin_pct + RHmax_pct)'},
  irrigation:{title:'Irrigation',required:true,description:'A complete event log, with plot IDs and amounts in millimeters.',columns:'Date, Plot, Irrigation_mm'},
@@ -152,22 +152,51 @@ async function collectUploads(){
  return uploads;
 }
 $('runButton').onclick=async()=>{
+ if(state.busy)return;
  let config;try{const missing=missingInputs();if(missing.length)throw Error(missing.join('\n'));config=requestConfig();}catch(e){failure(e.message);return;}
+ const run=++state.runGeneration;
  $('errorPanel').classList.add('hidden');$('progressLog').textContent='';clearDownloads();state.results=null;$('resultsContent').classList.add('hidden');$('emptyResults').classList.remove('hidden');$('downloadAll').classList.add('hidden');$('resultsDot').classList.add('hidden');setBusy(true);logProgress('Reading your selected files…');
  try{
   const uploads=await collectUploads();
-  if(state.local){await runLocal(config,uploads);return;}
-  if(!state.worker){state.worker=new Worker('worker.js?v=20261030-results4',{type:'module'});state.worker.onmessage=e=>{const m=e.data;if(m.type==='daily'||m.type==='daily_error'){receiveDaily(m);return;}if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};state.worker.onerror=e=>{failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);state.worker.terminate();state.worker=null;};}
-  state.worker.postMessage({type:'run',config,uploads},uploads.map(f=>f.bytes.buffer));
- }catch(e){failure(e.message);}
+  if(!currentRun(run))return;
+  if(state.local){await runLocal(config,uploads,run);return;}
+  if(!state.worker){
+   const worker=new Worker('worker.js?v=20261030-observations5',{type:'module'});state.worker=worker;
+   worker.onmessage=e=>{if(state.worker!==worker)return;const m=e.data;if(m.type==='daily'||m.type==='daily_error'){receiveDaily(m);return;}if(!currentRun(m.run)||!state.busy)return;if(m.type==='progress')logProgress(m.message);if(m.type==='result')done(m.result,m.binaries);if(m.type==='error')failure(m.message);};
+   worker.onerror=e=>{if(state.worker!==worker)return;worker.terminate();state.worker=null;if(state.busy)failure('The browser calculation stopped. Try again, or use the local Python version for large datasets. '+e.message);};
+  }
+  state.worker.postMessage({type:'run',run,config,uploads},uploads.map(f=>f.bytes.buffer));
+ }catch(e){if(currentRun(run))failure(e.message);}
 };
-$('cancelButton').onclick=async()=>{if(state.worker){state.worker.terminate();state.worker=null;}if(state.poll)clearTimeout(state.poll);if(state.local&&state.job)await fetch(`/api/jobs/${state.job}/cancel`,{method:'POST'}).catch(()=>{});state.job=null;setBusy(false);$('errorPanel').classList.remove('hidden');$('errorPanel').textContent='Analysis cancelled. Your input selections are still available.';};
+function currentRun(run){return run===state.runGeneration;}
+async function cancelLocalJob(id){if(id)await fetch(`/api/jobs/${id}/cancel`,{method:'POST'}).catch(()=>{});}
+$('cancelButton').onclick=async()=>{
+ const job=state.job;++state.runGeneration;
+ if(state.worker){state.worker.terminate();state.worker=null;}
+ if(state.poll)clearTimeout(state.poll);state.poll=null;state.job=null;
+ setBusy(false);$('errorPanel').classList.remove('hidden');$('errorPanel').textContent='Analysis cancelled. Your input selections are still available.';
+ if(state.local&&job)await cancelLocalJob(job);
+};
 function toBase64(bytes){let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(s);}
-async function runLocal(config,uploads){
+async function runLocal(config,uploads,run=state.runGeneration){
  const response=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config,uploads:uploads.map(f=>({role:f.role,name:f.name,data:toBase64(f.bytes)}))})});
- const body=await response.json();if(!response.ok)throw Error(body.error||'Cannot start the analysis.');state.job=body.id;
+ if(!currentRun(run)){const abandoned=await response.json().catch(()=>({}));if(abandoned.id)await cancelLocalJob(abandoned.id);return;}
+ const body=await response.json();
+ if(!currentRun(run)){if(body.id)await cancelLocalJob(body.id);return;}
+ if(!response.ok)throw Error(body.error||'Cannot start the analysis.');state.job=body.id;
  let seen=0;
- async function poll(){try{const response=await fetch(`/api/jobs/${body.id}`);const job=await response.json();if(!response.ok)throw Error(job.error||'Cannot read analysis status.');for(const message of (job.progress||[]).slice(seen))logProgress(message);seen=(job.progress||[]).length;if(job.status==='done'){state.job=null;state.completedJob=body.id;done(job.result);for(const [key,name] of [['zip','ixn_results.zip'],['xlsx','results/results.xlsx'],['pdf','results/plot_year_results.pdf']])state.downloads[key]=`/api/jobs/${body.id}/files/${name}`;}else if(job.status==='error'){failure(job.error||'Analysis failed.');state.job=null;}else if(state.busy)state.poll=setTimeout(poll,800);}catch(e){failure(e.message);}}
+ async function poll(){
+  if(!currentRun(run))return;state.poll=null;
+  try{
+   const response=await fetch(`/api/jobs/${body.id}`);if(!currentRun(run))return;
+   const job=await response.json();if(!currentRun(run))return;
+   if(!response.ok)throw Error(job.error||'Cannot read analysis status.');
+   for(const message of (job.progress||[]).slice(seen))logProgress(message);seen=(job.progress||[]).length;
+   if(job.status==='done'){state.job=null;state.completedJob=body.id;done(job.result);for(const [key,name] of [['zip','ixn_results.zip'],['xlsx','results/results.xlsx'],['pdf','results/plot_year_results.pdf']])state.downloads[key]=`/api/jobs/${body.id}/files/${name}`;}
+   else if(job.status==='error'){state.job=null;failure(job.error||'Analysis failed.');}
+   else if(state.busy)state.poll=setTimeout(poll,800);
+  }catch(e){if(currentRun(run))failure(e.message);}
+ }
  await poll();
 }
 function filteredRows(){const key=$('resultFilter').value;return state.results.plot_year.filter(r=>(key==='all'||`${r.Dataset} / ${r.Site} / ${r.Year}`===key)&&($('irrigationFilter').value==='all'||String(r.Irrigation_treatment)===$('irrigationFilter').value)&&($('nitrogenFilter').value==='all'||String(r.Nitrogen_treatment)===$('nitrogenFilter').value));}
