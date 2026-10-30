@@ -81,6 +81,17 @@ class InputTests(unittest.TestCase):
         self.assertAlmostEqual(table.loc[1,'Observed_storage_mm'], expected)
         self.assertAlmostEqual(table.loc[1,'Profile_depth_m'], .9144)
 
+    def test_invalid_pr2_reading_stays_in_audit_but_not_storage(self):
+        def edit(table):
+            table.loc[0,PR2_COLUMNS[0]]=2394
+            return table
+        self.modified('moisture',edit)
+        table=prepared_tables(self.config['files'])['moisture']
+        self.assertEqual(table.loc[0,PR2_COLUMNS[0]],2394)
+        self.assertEqual(table.loc[0,'Invalid_VWC_count'],1)
+        self.assertFalse(bool(table.loc[0,'Complete_profile']))
+        self.assertTrue(pd.isna(table.loc[0,'Observed_storage_mm']))
+
     def test_pr2_spreadsheet_westport_sheet_is_accepted(self):
         path=self.root/'pr2.xlsx'
         with pd.ExcelWriter(path) as writer:

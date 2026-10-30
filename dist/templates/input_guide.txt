@@ -28,8 +28,9 @@ Optional moisture columns: Date,Plot,6in_VWC %,12in_VWC %,18in_VWC %,24_inVWC %,
 These are raw PR2 volumetric water content percentages, as in the Westport sheet
 of Master_PR2_SM.xlsx. The interface integrates complete rows with midpoint
 cells over 0–0.9144 m. The standard model profile is matched to that depth;
-no water is extrapolated to 1.2 m. Missing depths remain missing and are not
-used for assimilation or measured water-balance intervals. The input audit
+no water is extrapolated to 1.2 m. Missing or out-of-range depths leave a
+profile missing and are not used for assimilation or measured water-balance
+intervals. Invalid raw values remain in the input audit, with counts. The audit
 preserves every raw depth reading. Alternatively supply Date,Plot,
 Observed_storage_mm for full-profile end-of-day storage in mm at the model depth.
 Without paired complete profiles, WB_ETa uses labeled modeled fallback.

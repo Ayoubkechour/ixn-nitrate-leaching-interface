@@ -46,9 +46,19 @@ function drawStorage(rows){
  ],'mm','No profile storage records are available for this plot.');
 }
 function drawDepthReadings(rows){
- const observed=rows.filter(row=>PR2_SERIES.some(([key])=>typeof row[key]==='number'&&Number.isFinite(row[key])));
+ let invalid=0;
+ const observed=rows.map(row=>{
+  const clean={...row};
+  for(const [key] of PR2_SERIES){
+   if(typeof clean[key]==='number'&&Number.isFinite(clean[key])&&(clean[key]<0||clean[key]>100)){
+    clean[key]=null;invalid++;
+   }
+  }
+  return clean;
+ }).filter(row=>PR2_SERIES.some(([key])=>typeof row[key]==='number'&&Number.isFinite(row[key])));
  $('depthChartCard').classList.toggle('hidden',!observed.length);
  if(!observed.length)return;
+ document.querySelector('#depthChartCard .card-title p').textContent=`PR2 VWC from the uploaded spreadsheet · %. ${invalid?`${invalid} out-of-range reading${invalid===1?'':'s'} hidden here and retained in the input audit.`:'Out-of-range readings stay out of the chart.'}`;
  const series=PR2_SERIES.map(([key,label,color])=>({key,label,color}));
  $('depthChartLegend').innerHTML=series.map(item=>`<span><i style="background:${item.color}"></i>${item.label}</span>`).join('');
  drawProfileChart('depthChart',observed,series,'%','No raw depth readings are available for this plot.');

@@ -118,10 +118,11 @@ def validate_table(table, role):
         if raw:
             numeric_checked(table, PR2_COLUMNS, allow_missing=True)
             values = table[PR2_COLUMNS]
-            if ((values < 0) | (values > 100)).any().any():
-                raise ValueError('Moisture: PR2 VWC readings must be percentages from 0 to 100.')
-            table['Complete_profile'] = values.notna().all(axis=1)
-            table['Observed_storage_mm'] = values.div(100).mul(PR2_WEIGHTS_MM, axis=1).sum(axis=1, min_count=len(PR2_COLUMNS))
+            invalid = (values < 0) | (values > 100)
+            valid_values = values.mask(invalid)
+            table['Invalid_VWC_count'] = invalid.sum(axis=1)
+            table['Complete_profile'] = valid_values.notna().all(axis=1)
+            table['Observed_storage_mm'] = valid_values.div(100).mul(PR2_WEIGHTS_MM, axis=1).sum(axis=1, min_count=len(PR2_COLUMNS))
             table['Profile_depth_m'] = PR2_DEPTH_M
         elif 'Observed_storage_mm' not in table:
             missing_depths = [name for name in PR2_COLUMNS if name not in table]
@@ -209,6 +210,9 @@ def analyze(request, workspace, progress=print):
             elif not math.isclose(p.soil_bottom_m[-1], PR2_DEPTH_M, abs_tol=1e-6):
                 raise ValueError('Raw PR2 readings cover 0–0.9144 m. Set the final soil layer bottom to 0.9144 m, or upload a complete Observed_storage_mm profile at your configured depth.')
             incomplete = int((~tables['moisture'].Complete_profile).sum())
+            invalid = int(tables['moisture'].Invalid_VWC_count.sum())
+            if invalid:
+                note(f'{invalid} PR2 VWC readings outside physical 0–100% were preserved in the input audit and excluded from storage integration.', 'water balance')
             if incomplete:
                 note(f'{incomplete} PR2 rows have missing depths; they remain in the input audit but are excluded from measured storage and water-balance intervals.', 'water balance')
         if not request.get('irrigation_complete'):

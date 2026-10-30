@@ -1,5 +1,10 @@
 # IXN nitrate leaching interface
 
+**Website:** https://ayoubkechour.github.io/ixn-nitrate-leaching-interface/
+
+The website runs the calculation in your browser. Use the local Python server
+below when you want to read a folder path on the server or run larger studies.
+
 A guided browser interface around the existing IXN Python engine: data uploads,
 study metadata, all soil/crop/hydrology parameters, review, execution, interactive
 results, and downloadable XLSX/CSV/PDF/PNG output bundles.
@@ -44,8 +49,9 @@ The included example and workbook contain synthetic data only.
 The prepared soil-moisture input accepts the five raw PR2 VWC percentage columns
 from the `Westport` sheet of `Master_PR2_SM.xlsx` (6, 12, 18, 24 and 36 inches).
 Complete rows are integrated over the observed 0–0.9144 m depth, with the default
-model profile matched to that depth. Incomplete rows remain missing, and the raw
-readings are preserved in the input audit and depth chart. A supplied
+model profile matched to that depth. Missing or physically invalid readings
+leave the measured profile missing; original values and invalid counts remain in
+the input audit. The raw readings are visible in the depth chart. A supplied
 `Observed_storage_mm` column remains supported for a complete configured profile.
 
 All `Parameters` fields are exposed. Missing nitrate produces water-only results.
