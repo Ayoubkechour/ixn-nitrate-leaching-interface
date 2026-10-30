@@ -1,0 +1,4 @@
+Pyodide 0.29.3
+Source: https://cdn.jsdelivr.net/pyodide/v0.29.3/full/
+https://github.com/pyodide/pyodide
+Mozilla Public License 2.0; individual package licenses are included in their wheels.

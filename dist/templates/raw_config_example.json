@@ -1,0 +1,9 @@
+{
+  "planting_overrides": {
+    "Becker-2024": "REPLACE_WITH_VERIFIED_YYYY-MM-DD"
+  },
+  "end_overrides": {},
+  "plot_plan_overrides": {
+    "Westport-2023": "plot_maps/Westport_2023.csv"
+  }
+}

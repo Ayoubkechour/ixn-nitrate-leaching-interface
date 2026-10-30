@@ -1,0 +1,49 @@
+IXN NITRATE & WATER BALANCE — INPUT GUIDE
+
+Use separate CSV/XLSX tables or one XLSX with Weather, Irrigation, Nitrate,
+Moisture and Plots sheets. Individual uploads override the matching workbook sheet.
+The downloadable workbook contains SYNTHETIC examples, not field measurements.
+
+Required weather columns:
+Date,Tmax_C,Tmin_C,Wind_m_s,Rs_MJ_m2_day,Rain_mm,Tdew_C
+Instead of Tdew_C you may provide RHmin_pct,RHmax_pct. Paired RH takes priority.
+Units: Celsius, m/s, MJ/m2/day, mm/day. One unique consecutive date per day.
+Cover planting through analysis end and include preplant history. The original
+raw workflow starts April 1; the supplied weather start initializes the prepared
+tables calculation. Missing weather is an error, never zero-filled.
+
+Required irrigation columns: Date,Plot,Irrigation_mm
+One unique record per date/plot; this must be a complete event log. Days without
+a record are zero. Include an explicit zero record for a non-irrigated plot.
+Blank logged amounts cause an error unless the flagged zero scenario is selected.
+
+Optional nitrate columns: Date,Plot,Nitrate_mg_L
+Measured solution concentration only. Select source units and analyte basis.
+The column name remains Nitrate_mg_L when source units are micrograms/L; the
+interface converts that selection to mg/L. Valid zeros are retained; sentinels
+999/9999 become missing. At least two valid in-season dates per plot are needed
+for load. Load covers those intervals only, with no extrapolation.
+
+Optional moisture columns: Date,Plot,Observed_storage_mm
+End-of-day total storage in mm over the full soil profile configured in settings.
+Partial profiles cannot be used. Without pairs of complete profiles, WB_ETa
+uses modeled fallback, labeled in the outputs.
+
+Optional plot map columns: Plot,Irrigation_treatment,Nitrogen_treatment,Rep
+Plot and Rep are whole numbers. Use any treatment labels. Without a map,
+treatments remain Unspecified and Rep=0. With a map, every observed plot must
+have an entry; mapped non-irrigated plots may have no events.
+
+Raw IXN mode uses the original Raw_data_NNI structure: Weather_data CSV files,
+Master_fielddata/Master_Irrigation.xlsx, Master_PR2_SM.xlsx and
+Nitrate_Concentrations_RAW_Lab.xlsx, plus Site/Year/Experimental_protocol/*.xlsx.
+Collection calendar (optional CSV): Site,Year,Week,Collection_date.
+Date/plot-map overrides: JSON as shown in raw_config_example.json. Plot-map
+paths are relative to the selected folder; put uploaded maps in plot_maps/.
+Westport 2023 stays excluded without a verified map. Becker 2024 needs a
+verified planting-date override. The one-plot reference workbook is not raw data.
+
+Outputs: plot-year workbook and CSVs; interval water balance and leaching;
+daily CSV.gz; treatment summaries; quality/validation tables; figures in
+PDF/PNG; a run manifest with input hashes, model settings and software versions.
+Numerical agreement verifies implementation, not field prediction accuracy.
